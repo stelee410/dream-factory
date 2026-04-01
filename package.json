@@ -1,0 +1,16 @@
+{
+  "name": "dreamfactory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DreamFactory — AI-powered short drama generator for digital characters",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @dreamfactory/cli dev",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

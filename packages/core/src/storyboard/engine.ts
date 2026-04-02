@@ -5,9 +5,16 @@ import type { ChatMessage } from "../ai/index.js";
 import type { CharacterDossier } from "../interview/index.js";
 import type { CharacterProfile } from "../character/index.js";
 import type { Script } from "../script/index.js";
-import type { Shot, Storyboard } from "./types.js";
+import type { Shot, Storyboard, SubSegment } from "./types.js";
 
-const SHOT_BREAKDOWN_PROMPT = `你是一位专业的分镜师。将剧本拆解为具体的镜头列表。
+const MAX_SEGMENT_DURATION = 10;
+
+function buildShotBreakdownPrompt(directorStylePrompt?: string): string {
+  const directorSection = directorStylePrompt
+    ? `\n\n## 导演风格\n${directorStylePrompt}\n请在每个镜头中体现该导演风格的视觉特点。`
+    : "";
+
+  return `你是一位专业的分镜师。将剧本拆解为具体的镜头列表。
 
 输出要求：严格按照 JSON 数组格式，不要添加其他文字。
 每个镜头：
@@ -17,7 +24,22 @@ const SHOT_BREAKDOWN_PROMPT = `你是一位专业的分镜师。将剧本拆解�
   "shot_type": "近景/中景/远景/特写/跟拍/俯拍",
   "duration": 5,
   "description": "画面内容中文描述",
-  "dialogue": "对应的台词（无则为null）",
+  "scene": "场景描述（详细画面内容）",
+  "camera": {
+    "movement": "运镜方式（如：跟拍、推拉、平移、环绕、固定等）",
+    "angle": "拍摄角度（如：平视、仰拍、俯拍、鸟瞰等）",
+    "lens": "镜头焦段（如：35mm广角、50mm标准、85mm中长焦等）"
+  },
+  "lighting": {
+    "type": "灯光类型（如：自然光、逆光、伦勃朗光、柔光等）",
+    "color_tone": "色彩倾向（如：暖色调、冷色调、高对比等）"
+  },
+  "audio": {
+    "dialogue": "对应的台词（无则为空字符串）",
+    "sfx": "音效描述（如：脚步声、雨声、杯子碰撞声等）",
+    "music": "配乐风格（如：钢琴轻音乐、弦乐渐强等）"
+  },
+  "mood": "氛围/情绪（如：怀旧温暖、紧张悬疑、欢快轻松等）",
   "image_prompt": "English prompt for AI image generation, detailed and specific"
 }
 
@@ -25,14 +47,17 @@ image_prompt 构造规则：
 1. 开头必须包含角色外貌描述（保持一致性）
 2. 包含场景环境描述
 3. 包含角色动作和表情
-4. 包含镜头类型（close-up, medium shot, wide shot, etc.）
-5. 结尾添加画面风格：cinematic, soft lighting, warm color palette, anime-influenced illustration style
-6. 全部用英文
+4. 包含镜头类型和角度（如：low angle close-up, bird's eye wide shot）
+5. 包含灯光和色调描述（如：warm golden backlight, cold blue tone）
+6. 包含氛围描述
+7. 结尾添加画面风格：cinematic, soft lighting, warm color palette, anime-influenced illustration style
+8. 全部用英文
 
 约束：
 - 每个场景拆 1-3 个镜头
 - 每个镜头 3-8 秒
-- 总时长 30-60 秒`;
+- 总时长 30-60 秒${directorSection}`;
+}
 
 const IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
@@ -40,16 +65,23 @@ export class StoryboardEngine {
   private ai: AIClient;
   private dossier: CharacterDossier;
   private character: CharacterProfile;
+  private directorStylePrompt: string;
 
-  constructor(ai: AIClient, dossier: CharacterDossier, character: CharacterProfile) {
+  constructor(
+    ai: AIClient,
+    dossier: CharacterDossier,
+    character: CharacterProfile,
+    directorStylePrompt?: string
+  ) {
     this.ai = ai;
     this.dossier = dossier;
     this.character = character;
+    this.directorStylePrompt = directorStylePrompt ?? "";
   }
 
   async breakdownShots(script: Script): Promise<Shot[]> {
     const messages: ChatMessage[] = [
-      { role: "system", content: SHOT_BREAKDOWN_PROMPT },
+      { role: "system", content: buildShotBreakdownPrompt(this.directorStylePrompt) },
       {
         role: "user",
         content: `## 角色外貌\n${this.dossier.appearance}\n\n## 剧本\n${JSON.stringify(script, null, 2)}`,
@@ -65,48 +97,85 @@ export class StoryboardEngine {
       null,
       result,
     ];
-    const shots = JSON.parse(jsonMatch[1]!.trim()) as Shot[];
-    return shots.map((s) => ({ ...s, image_path: null }));
+    const rawShots = JSON.parse(jsonMatch[1]!.trim()) as Omit<Shot, "gen_mode" | "image_path">[];
+    return rawShots.map((s) => ({
+      ...s,
+      // Backward compat: ensure description is populated from scene if missing
+      description: s.description || s.scene || "",
+      scene: s.scene || s.description || "",
+      // Populate dialogue from audio.dialogue for backward compat
+      dialogue: s.dialogue ?? s.audio?.dialogue ?? null,
+      image_path: null,
+      ...this.assignGenMode(s.shot_number, s.duration),
+    }));
   }
 
-  async generateImage(shot: Shot): Promise<Buffer> {
-    // Build message content: text prompt + optional design sheet reference image
-    const content: Array<Record<string, unknown>> = [
-      {
-        type: "text",
-        text: `Generate an image based on this character design reference. Keep the character appearance consistent with the reference. Prompt: ${shot.image_prompt}`,
-      },
-    ];
+  /**
+   * Determine gen_mode and create sub_segments if needed.
+   */
+  private assignGenMode(
+    shotNumber: number,
+    duration: number
+  ): Pick<Shot, "gen_mode" | "ref_images" | "sub_segments"> {
+    if (duration <= MAX_SEGMENT_DURATION) {
+      return { gen_mode: "single_ref", ref_images: [] };
+    }
 
-    // Include character design sheet as reference for consistency
-    if (this.character.characterDesignSheetUrl) {
-      content.push({
-        type: "image_url",
-        image_url: { url: this.character.characterDesignSheetUrl },
+    const subSegments: SubSegment[] = [];
+    let remaining = duration;
+    let segIndex = 1;
+
+    while (remaining > 0) {
+      const segDuration = Math.min(remaining, MAX_SEGMENT_DURATION);
+      const segId = `shot_${shotNumber}_seg_${segIndex}`;
+      subSegments.push({
+        seg_id: segId,
+        start_frame: null,
+        end_frame: null,
+        duration: segDuration,
       });
+      remaining -= segDuration;
+      segIndex++;
     }
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.ai.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: IMAGE_MODEL,
-        messages: [{ role: "user", content }],
-      }),
-    });
+    return { gen_mode: "frame_stitch", ref_images: [], sub_segments: subSegments };
+  }
 
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      throw new Error(`Image generation failed (${res.status}): ${err}`);
+  /**
+   * Build an enriched image prompt incorporating camera, lighting, and mood.
+   * Truncated to 1000 chars max to avoid excessively long prompts when multiple styles are combined.
+   */
+  private buildImagePrompt(shot: Shot): string {
+    const parts = [shot.image_prompt];
+
+    if (shot.camera) {
+      if (shot.camera.angle) parts.push(`${shot.camera.angle} angle`);
+      if (shot.camera.lens) parts.push(`shot with ${shot.camera.lens} lens`);
     }
 
-    const data = await res.json() as any;
+    if (shot.lighting) {
+      if (shot.lighting.type) parts.push(`${shot.lighting.type} lighting`);
+      if (shot.lighting.color_tone) parts.push(`${shot.lighting.color_tone} color grading`);
+    }
+
+    if (shot.mood) {
+      parts.push(`mood: ${shot.mood}`);
+    }
+
+    if (this.directorStylePrompt) {
+      parts.push(`Director style: ${this.directorStylePrompt}`);
+    }
+
+    const result = parts.join(". ");
+    return result.length > 1000 ? result.slice(0, 1000) : result;
+  }
+
+  /**
+   * Extract image buffer from OpenRouter API response.
+   */
+  private async extractImageFromResponse(data: any): Promise<Buffer> {
     const message = data.choices?.[0]?.message;
 
-    // OpenRouter returns images in message.images array
     if (Array.isArray(message?.images)) {
       for (const img of message.images) {
         const url = img.image_url?.url ?? img.url;
@@ -121,7 +190,6 @@ export class StoryboardEngine {
       }
     }
 
-    // Fallback: check content for inline images
     const msgContent = message?.content;
     if (Array.isArray(msgContent)) {
       for (const part of msgContent) {
@@ -147,6 +215,127 @@ export class StoryboardEngine {
     throw new Error("Could not extract image from AI response");
   }
 
+  /**
+   * Call OpenRouter image generation API and return the image buffer.
+   */
+  private async callImageApi(promptText: string): Promise<Buffer> {
+    const content: Array<Record<string, unknown>> = [
+      { type: "text", text: promptText },
+    ];
+
+    if (this.character.characterDesignSheetUrl) {
+      content.push({
+        type: "image_url",
+        image_url: { url: this.character.characterDesignSheetUrl },
+      });
+    }
+
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.ai.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: IMAGE_MODEL,
+        messages: [{ role: "user", content }],
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      throw new Error(`Image generation failed (${res.status}): ${err}`);
+    }
+
+    const data = await res.json() as any;
+    return this.extractImageFromResponse(data);
+  }
+
+  async generateImage(shot: Shot): Promise<Buffer> {
+    const enrichedPrompt = this.buildImagePrompt(shot);
+    return this.callImageApi(
+      `Generate an image based on this character design reference. Keep the character appearance consistent with the reference. Prompt: ${enrichedPrompt}`
+    );
+  }
+
+  private async generateKeyframe(
+    shot: Shot,
+    timePointDescription: string
+  ): Promise<Buffer> {
+    const enrichedPrompt = this.buildImagePrompt(shot);
+    return this.callImageApi(
+      `Generate an image based on this character design reference. Keep the character appearance consistent with the reference. This is a keyframe at a specific moment. Prompt: ${enrichedPrompt}. Moment: ${timePointDescription}`
+    );
+  }
+
+  private async generateKeyframeDescriptions(
+    shot: Shot
+  ): Promise<string[]> {
+    const numKeyframes = (shot.sub_segments?.length ?? 0) + 1;
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content: `你是一位专业的分镜师。给定一个长镜头的描述，将其拆解为 ${numKeyframes} 个关键时间点的画面描述。
+每个时间点用英文描述，保持画面连续性。输出严格 JSON 数组格式，不要添加其他文字。
+示例：["Character enters the cafe, standing at the door", "Character walks to the counter, looking around", "Character sits down at a table with a smile"]`,
+      },
+      {
+        role: "user",
+        content: `镜头描述：${shot.scene || shot.description}\n总时长：${shot.duration}秒\n分为 ${shot.sub_segments?.length} 个子片段\n角色外貌：${this.dossier.appearance}\nimage_prompt 基础：${shot.image_prompt}`,
+      },
+    ];
+
+    const result = await this.ai.chat(messages, {
+      temperature: 0.4,
+      max_tokens: 2048,
+    });
+
+    const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, result];
+    const descriptions = JSON.parse(jsonMatch[1]!.trim()) as string[];
+
+    while (descriptions.length < numKeyframes) {
+      descriptions.push(shot.description);
+    }
+    if (descriptions.length > numKeyframes) {
+      descriptions.length = numKeyframes;
+    }
+
+    return descriptions;
+  }
+
+  private async generateKeyframes(
+    shot: Shot,
+    outDir: string,
+    onProgress?: (frameIdx: number, totalFrames: number) => void
+  ): Promise<void> {
+    if (!shot.sub_segments || shot.sub_segments.length === 0) return;
+
+    const descriptions = await this.generateKeyframeDescriptions(shot);
+    const numKeyframes = shot.sub_segments.length + 1;
+
+    for (let i = 0; i < numKeyframes; i++) {
+      onProgress?.(i + 1, numKeyframes);
+      const desc = descriptions[i]!;
+      const imageData = await this.generateKeyframe(shot, desc);
+      const frameName = i === 0
+        ? `shot_${String(shot.shot_number).padStart(2, "0")}_start.png`
+        : i === numKeyframes - 1
+        ? `shot_${String(shot.shot_number).padStart(2, "0")}_end.png`
+        : `shot_${String(shot.shot_number).padStart(2, "0")}_mid${i}.png`;
+      const framePath = join(outDir, frameName);
+      writeFileSync(framePath, imageData);
+
+      if (i < shot.sub_segments.length) {
+        shot.sub_segments[i]!.start_frame = framePath;
+      }
+      if (i > 0) {
+        shot.sub_segments[i - 1]!.end_frame = framePath;
+      }
+    }
+
+    shot.image_path = shot.sub_segments[0]!.start_frame;
+  }
+
   async generateStoryboard(
     script: Script,
     outDir: string,
@@ -158,17 +347,16 @@ export class StoryboardEngine {
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i]!;
       onProgress?.(i + 1, shots.length);
-      try {
+
+      if (shot.gen_mode === "frame_stitch") {
+        await this.generateKeyframes(shot, outDir);
+      } else {
         const imageData = await this.generateImage(shot);
         const filename = `shot_${String(shot.shot_number).padStart(2, "0")}.png`;
         const filePath = join(outDir, filename);
         writeFileSync(filePath, imageData);
         shot.image_path = filePath;
-      } catch (e) {
-        console.error(
-          `Failed to generate image for shot ${shot.shot_number}:`,
-          e instanceof Error ? e.message : e
-        );
+        shot.ref_images = [filePath];
       }
     }
 
@@ -177,6 +365,51 @@ export class StoryboardEngine {
       title: script.title,
       shots,
       total_duration: totalDuration,
+      director_style: this.directorStylePrompt || undefined,
     };
+  }
+
+  /**
+   * Generate a markdown representation of the storyboard.
+   */
+  static toMarkdown(storyboard: Storyboard): string {
+    let md = `# ${storyboard.title} — 分镜表\n\n`;
+
+    if (storyboard.director_style) {
+      md += `**导演风格**: ${storyboard.director_style}\n\n`;
+    }
+
+    md += `**总时长**: ${storyboard.total_duration}s | **镜头数**: ${storyboard.shots.length}\n\n---\n\n`;
+
+    for (const shot of storyboard.shots) {
+      md += `## 镜头 ${String(shot.shot_number).padStart(2, "0")} — ${shot.shot_type} (${shot.duration}s)\n\n`;
+      md += `**场景**: ${shot.scene || shot.description}\n\n`;
+
+      if (shot.camera) {
+        md += `**摄影**: 运镜 ${shot.camera.movement} | 角度 ${shot.camera.angle} | 焦段 ${shot.camera.lens}\n\n`;
+      }
+
+      if (shot.lighting) {
+        md += `**灯光**: ${shot.lighting.type} | ${shot.lighting.color_tone}\n\n`;
+      }
+
+      if (shot.mood) {
+        md += `**氛围**: ${shot.mood}\n\n`;
+      }
+
+      if (shot.audio) {
+        if (shot.audio.dialogue) md += `**对白**: ${shot.audio.dialogue}\n\n`;
+        if (shot.audio.sfx) md += `**音效**: ${shot.audio.sfx}\n\n`;
+        if (shot.audio.music) md += `**配乐**: ${shot.audio.music}\n\n`;
+      }
+
+      if (shot.gen_mode === "frame_stitch" && shot.sub_segments) {
+        md += `**生成模式**: 首尾帧拼接 (${shot.sub_segments.length} 个子片段)\n\n`;
+      }
+
+      md += `---\n\n`;
+    }
+
+    return md;
   }
 }

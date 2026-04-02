@@ -10,6 +10,14 @@ interface Props {
   onComplete: (output: VideoOutput) => void;
 }
 
+function parsePhase(phase: string): { base: string; segInfo?: string } {
+  const segMatch = phase.match(/^(submit|poll)_seg_(\d+\/\d+)$/);
+  if (segMatch) {
+    return { base: segMatch[1]!, segInfo: segMatch[2] };
+  }
+  return { base: phase };
+}
+
 export function VideoGeneration({ engine, storyboard, outDir, onComplete }: Props) {
   const { exit } = useApp();
   const [progress, setProgress] = useState({ current: 0, total: 0, phase: "init" });
@@ -47,26 +55,30 @@ export function VideoGeneration({ engine, storyboard, outDir, onComplete }: Prop
   }
 
   if (!output) {
+    const { base, segInfo } = parsePhase(progress.phase);
+
     return (
       <Box flexDirection="column" padding={1}>
         <Text bold color="cyan">
           🎬 DreamFactory — 生成视频
         </Text>
         <Box height={1} />
-        {progress.phase === "submit" ? (
+        {base === "submit" ? (
           <Box flexDirection="column">
             <Text>
               <Spinner type="dots" /> 提交 Seedance 视频任务... ({progress.current}/{progress.total})
+              {segInfo && <Text dimColor> [子片段 {segInfo}]</Text>}
             </Text>
             <Text dimColor>
               {"█".repeat(progress.current)}
               {"░".repeat(Math.max(0, progress.total - progress.current))}
             </Text>
           </Box>
-        ) : progress.phase === "poll" ? (
+        ) : base === "poll" ? (
           <Box flexDirection="column">
             <Text>
               <Spinner type="dots" /> 等待镜头 {progress.current} 视频生成完成...（Seedance 处理中）
+              {segInfo && <Text dimColor> [子片段 {segInfo}]</Text>}
             </Text>
             <Text dimColor>
               {"█".repeat(progress.current - 1)}
@@ -94,15 +106,20 @@ export function VideoGeneration({ engine, storyboard, outDir, onComplete }: Prop
       </Text>
       <Box height={1} />
 
-      {output.clips.map((clip) => (
-        <Box key={clip.shot_number}>
-          <Text>
-            <Text color="green">✓</Text> 镜头 {String(clip.shot_number).padStart(2, "0")}{" "}
-            ({clip.duration}s)
-            {clip.dialogue && <Text dimColor> 💬 {clip.dialogue}</Text>}
-          </Text>
-        </Box>
-      ))}
+      {output.clips.map((clip) => {
+        const shot = storyboard.shots.find((s) => s.shot_number === clip.shot_number);
+        const isStitched = shot?.gen_mode === "frame_stitch";
+        return (
+          <Box key={clip.shot_number}>
+            <Text>
+              <Text color="green">✓</Text> 镜头 {String(clip.shot_number).padStart(2, "0")}{" "}
+              ({clip.duration}s)
+              {isStitched && <Text color="blue"> [拼接]</Text>}
+              {clip.dialogue && <Text dimColor> 💬 {clip.dialogue}</Text>}
+            </Text>
+          </Box>
+        );
+      })}
 
       <Box height={1} />
       <Text bold color="green">

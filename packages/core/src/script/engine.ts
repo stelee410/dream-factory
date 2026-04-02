@@ -82,21 +82,28 @@ export class ScriptEngine {
   private ai: AIClient;
   private character: CharacterProfile;
   private dossier: CharacterDossier;
+  private directorStylePrompt: string;
 
   constructor(
     ai: AIClient,
     character: CharacterProfile,
-    dossier: CharacterDossier
+    dossier: CharacterDossier,
+    directorStylePrompt?: string
   ) {
     this.ai = ai;
     this.character = character;
     this.dossier = dossier;
+    this.directorStylePrompt = directorStylePrompt ?? "";
   }
 
   async generateOutlines(theme: string): Promise<Outline[]> {
     const context = dossierToContext(this.character, this.dossier);
+    const systemPrompt = this.directorStylePrompt
+      ? `${OUTLINE_PROMPT}\n\n## 导演风格要求\n${this.directorStylePrompt}\n请在大纲中体现导演风格的视觉特点和叙事方式。`
+      : OUTLINE_PROMPT;
+
     const messages: ChatMessage[] = [
-      { role: "system", content: OUTLINE_PROMPT },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: `${context}\n\n## 短剧主题\n${theme}`,
@@ -117,8 +124,12 @@ export class ScriptEngine {
 
   async generateScript(outline: Outline): Promise<Script> {
     const context = dossierToContext(this.character, this.dossier);
+    const systemPrompt = this.directorStylePrompt
+      ? `${SCRIPT_PROMPT}\n\n## 导演风格要求\n${this.directorStylePrompt}\n请在剧本的场景描述、镜头提示中体现导演风格的视觉特点。`
+      : SCRIPT_PROMPT;
+
     const messages: ChatMessage[] = [
-      { role: "system", content: SCRIPT_PROMPT },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: `${context}\n\n## 选定大纲\n标题: ${outline.title}\n类型: ${outline.genre}\n概要: ${outline.synopsis}\n场景摘要:\n${outline.scene_summaries.map((s, i) => `${i + 1}. ${s}`).join("\n")}`,

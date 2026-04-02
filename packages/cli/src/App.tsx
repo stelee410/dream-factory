@@ -6,11 +6,14 @@ import {
   ScriptEngine,
   StoryboardEngine,
   VideoEngine,
+  mergeDirectorStyles,
+  describeDirectorStyles,
 } from "@dreamfactory/core";
 import type {
   AuthSession,
   CharacterProfile,
   CharacterDossier,
+  DirectorStyle,
   Outline,
   Script,
   Storyboard,
@@ -21,6 +24,7 @@ import { CharacterSelect } from "./screens/CharacterSelect.js";
 import { Interview } from "./screens/Interview.js";
 import { DossierView } from "./screens/DossierView.js";
 import { ThemeInput } from "./screens/ThemeInput.js";
+import { DirectorStyleSelect } from "./screens/DirectorStyleSelect.js";
 import { OutlineSelect } from "./screens/OutlineSelect.js";
 import { ScriptPreview } from "./screens/ScriptPreview.js";
 import { StoryboardView } from "./screens/StoryboardView.js";
@@ -34,6 +38,7 @@ type Screen =
   | "interview"
   | "dossier"
   | "theme-input"
+  | "director-style"
   | "outline-select"
   | "script-preview"
   | "storyboard"
@@ -63,6 +68,8 @@ export function App() {
   const [interviewEngine, setInterviewEngine] = useState<InterviewEngine | null>(null);
   const [dossier, setDossier] = useState<CharacterDossier | null>(null);
   const [theme, setTheme] = useState("");
+  const [directorStylePrompt, setDirectorStylePrompt] = useState("");
+  const [directorStyleLabel, setDirectorStyleLabel] = useState("");
   const [scriptEngine, setScriptEngine] = useState<ScriptEngine | null>(null);
   const [selectedOutline, setSelectedOutline] = useState<Outline | null>(null);
   const [script, setScript] = useState<Script | null>(null);
@@ -145,8 +152,30 @@ export function App() {
         character={character}
         onSubmit={(t) => {
           setTheme(t);
+          setScreen("director-style");
+        }}
+      />
+    );
+  }
+
+  if (screen === "director-style") {
+    return (
+      <DirectorStyleSelect
+        onSelect={(styles: DirectorStyle[], customDescription?: string) => {
+          const prompt = mergeDirectorStyles(styles, customDescription);
+          const label = describeDirectorStyles(styles, customDescription);
+          setDirectorStylePrompt(prompt);
+          setDirectorStyleLabel(label);
+
+          // Save director style selection
+          writeFileSync(
+            join(projectDir, "director-style.json"),
+            JSON.stringify({ styles: styles.map((s) => s.id), customDescription, prompt, label }, null, 2),
+            "utf-8"
+          );
+
           if (df.ai && dossier && character) {
-            setScriptEngine(new ScriptEngine(df.ai, character, dossier));
+            setScriptEngine(new ScriptEngine(df.ai, character, dossier, prompt));
           }
           setScreen("outline-select");
         }}
@@ -189,7 +218,7 @@ export function App() {
           );
 
           if (df.ai && dossier) {
-            setStoryboardEngine(new StoryboardEngine(df.ai, dossier, character));
+            setStoryboardEngine(new StoryboardEngine(df.ai, dossier, character, directorStylePrompt));
           }
           setScreen("storyboard");
         }}
@@ -210,6 +239,11 @@ export function App() {
           writeFileSync(
             join(sbDir, "storyboard.json"),
             JSON.stringify(sb, null, 2),
+            "utf-8"
+          );
+          writeFileSync(
+            join(sbDir, "storyboard.md"),
+            StoryboardEngine.toMarkdown(sb),
             "utf-8"
           );
           setScreen("video");
@@ -243,13 +277,14 @@ export function App() {
         <Text bold>项目目录: {projectDir}/</Text>
         <Box height={1} />
         <Text bold>产出文件:</Text>
-        <Text color="green">  ✓ dossier.json      — 角色档案</Text>
-        <Text color="green">  ✓ script.json        — 剧本 (JSON)</Text>
-        <Text color="green">  ✓ script.md          — 剧本 (可读版)</Text>
-        <Text color="green">  ✓ storyboard/        — 分镜图 + storyboard.json</Text>
+        <Text color="green">  ✓ dossier.json        — 角色档案</Text>
+        <Text color="green">  ✓ director-style.json  — 导演风格</Text>
+        <Text color="green">  ✓ script.json          — 剧本 (JSON)</Text>
+        <Text color="green">  ✓ script.md            — 剧本 (可读版)</Text>
+        <Text color="green">  ✓ storyboard/          — 分镜图 + storyboard.json + storyboard.md</Text>
         {videoOutput && (
           <>
-            <Text color="green">  ✓ videos/final.mp4   — 最终视频</Text>
+            <Text color="green">  ✓ videos/final.mp4     — 最终视频</Text>
             <Text dimColor>
               {"    "}
               {videoOutput.clips.length} 个镜头, 总时长 {videoOutput.total_duration}s
@@ -259,6 +294,9 @@ export function App() {
         <Box height={1} />
         <Text>
           角色: <Text bold color="green">{character?.name}</Text> | 主题: <Text bold color="yellow">{theme}</Text>
+          {directorStyleLabel && (
+            <Text> | 风格: <Text bold color="magenta">{directorStyleLabel}</Text></Text>
+          )}
         </Text>
         <Text dimColor>感谢使用 DreamFactory!</Text>
       </Box>

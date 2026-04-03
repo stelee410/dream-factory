@@ -51,7 +51,7 @@ export class ProjectState {
    */
   static resolveProjectDir(arg?: string, baseDir?: string): string {
     const base = baseDir ?? process.cwd();
-    const projectsRoot = join(base, ".dreamfactory", "projects");
+    const projectsRoot = join(base, "dreamfactory", "projects");
 
     if (!arg || arg === "") {
       const ts = ProjectState.makeTimestamp();

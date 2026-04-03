@@ -40,7 +40,7 @@ dreamfactory
 dreamfactory last
 
 # Resume a specific project
-dreamfactory .dreamfactory/projects/20260402_103410
+dreamfactory dreamfactory/projects/20260402_103410
 
 # Linear mode (guided step-by-step)
 dreamfactory linear
@@ -49,7 +49,7 @@ dreamfactory linear
 dreamfactory --help
 ```
 
-The current directory is your workspace. Projects are saved under `.dreamfactory/projects/` in the current directory.
+The current directory is your workspace. Projects are saved under `dreamfactory/projects/` in the current directory.
 
 ### Agent Mode
 
@@ -85,10 +85,10 @@ Login (linkyun.co credentials)
 
 ## Output Files
 
-Each run creates a timestamped project directory under `.dreamfactory/projects/`:
+Each run creates a timestamped project directory under `dreamfactory/projects/`:
 
 ```
-.dreamfactory/projects/YYYYMMDD_HHMMSS/
+dreamfactory/projects/YYYYMMDD_HHMMSS/
 ├── character.json       # Selected character profile
 ├── dossier.json         # Character dossier from interview
 ├── director-style.json  # Director style selection

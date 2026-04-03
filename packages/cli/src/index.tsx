@@ -26,7 +26,7 @@ Environment:
     SEEDANCE_API_KEY=xxx           (for video generation)
     WAN_API_KEY=xxx                (for storyboard images)
 
-Projects are saved under .dreamfactory/projects/ in the current directory.
+Projects are saved under dreamfactory/projects/ in the current directory.
 `);
   process.exit(0);
 }

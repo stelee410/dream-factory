@@ -56,7 +56,7 @@ function makeProjectDir(): string {
     String(now.getMinutes()).padStart(2, "0"),
     String(now.getSeconds()).padStart(2, "0"),
   ].join("");
-  const dir = join(process.cwd(), ".dreamfactory", "projects", ts);
+  const dir = join(process.cwd(), "dreamfactory", "projects", ts);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

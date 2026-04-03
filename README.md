@@ -31,11 +31,30 @@ pnpm build
 
 ## Run
 
+### Linear Mode (guided step-by-step)
+
 ```bash
 pnpm dev
 # or
 node packages/cli/dist/index.js
 ```
+
+### Agent Mode (AI-powered interactive assistant)
+
+```bash
+# New project
+node packages/cli/dist/index.js agent
+
+# Resume the most recent project
+node packages/cli/dist/index.js agent last
+
+# Resume a specific project directory
+node packages/cli/dist/index.js agent .dreamfactory/projects/20260402_103410
+```
+
+Agent mode provides an AI assistant that can freely call pipeline tools based on natural language instructions. You can re-interview, change director styles, rewrite scripts, regenerate storyboards or videos at any point.
+
+Commands in agent mode: `/login`, `/status`, `/done` (end interview), `/quit`.
 
 ## Complete Flow
 
@@ -53,14 +72,22 @@ Login (linkyun.co credentials)
 
 ## Output Files
 
-All outputs are saved to `.dreamfactory/` in the working directory:
+Each run creates a timestamped project directory under `.dreamfactory/projects/`:
 
 ```
-.dreamfactory/
-├── dossiers/          # Character profiles (JSON)
-├── scripts/           # Scripts (JSON + Markdown)
-├── storyboards/       # Shot breakdowns + images (PNG)
-└── videos/            # Video clips + final.mp4
+.dreamfactory/projects/YYYYMMDD_HHMMSS/
+├── character.json       # Selected character profile
+├── dossier.json         # Character dossier from interview
+├── director-style.json  # Director style selection
+├── script.json          # Full script (JSON)
+├── script.md            # Full script (readable)
+├── storyboard/          # Shot breakdowns + AI-generated images (PNG)
+│   ├── storyboard.json
+│   ├── storyboard.md
+│   └── shot_01.png ...
+└── videos/              # Video clips + final.mp4
+    ├── shot_01.mp4 ...
+    └── final.mp4
 ```
 
 ## Architecture
@@ -70,13 +97,16 @@ packages/
 ├── core/              # Shared business logic
 │   ├── auth/          # linkyun.co authentication
 │   ├── character/     # Digital character management
-│   ├── ai/            # OpenRouter AI client
+│   ├── ai/            # OpenRouter AI client (+ tool calling)
 │   ├── interview/     # Character interview engine
+│   ├── director/      # Director style presets
 │   ├── script/        # Script generation engine
 │   ├── storyboard/    # Storyboard breakdown + image generation
-│   └── video/         # Video generation (ffmpeg)
+│   ├── video/         # Video generation (ffmpeg)
+│   └── agent/         # AI Agent (tool calling, project state)
 └── cli/               # Ink (React for CLI) application
-    └── screens/       # Login, CharacterSelect, Interview, etc.
+    ├── screens/       # Login, CharacterSelect, Interview, etc.
+    └── AgentChat.tsx  # Agent mode chat interface
 ```
 
 ## Tech Stack

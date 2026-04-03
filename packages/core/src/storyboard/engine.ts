@@ -1,13 +1,23 @@
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AIClient } from "../ai/index.js";
 import type { ChatMessage } from "../ai/index.js";
+import { safeFetch } from "../api.js";
 import type { CharacterDossier } from "../interview/index.js";
 import type { CharacterProfile } from "../character/index.js";
 import type { Script } from "../script/index.js";
 import type { Shot, Storyboard, SubSegment } from "./types.js";
+import { WanImageClient } from "./wan-image.js";
 
 const MAX_SEGMENT_DURATION = 10;
+
+export type ImageProvider = "wan" | "openrouter";
+
+export interface StoryboardEngineOptions {
+  imageProvider?: ImageProvider;
+  wanApiKey?: string;
+  wanModel?: "wan2.7-image" | "wan2.7-image-pro";
+}
 
 function buildShotBreakdownPrompt(directorStylePrompt?: string): string {
   const directorSection = directorStylePrompt
@@ -59,24 +69,34 @@ image_prompt 构造规则：
 - 总时长 30-60 秒${directorSection}`;
 }
 
-const IMAGE_MODEL = "google/gemini-2.5-flash-image";
+const OPENROUTER_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
 export class StoryboardEngine {
   private ai: AIClient;
   private dossier: CharacterDossier;
   private character: CharacterProfile;
   private directorStylePrompt: string;
+  private imageProvider: ImageProvider;
+  private wanClient: WanImageClient | null;
 
   constructor(
     ai: AIClient,
     dossier: CharacterDossier,
     character: CharacterProfile,
-    directorStylePrompt?: string
+    directorStylePrompt?: string,
+    opts?: StoryboardEngineOptions
   ) {
     this.ai = ai;
     this.dossier = dossier;
     this.character = character;
     this.directorStylePrompt = directorStylePrompt ?? "";
+
+    const wanKey = opts?.wanApiKey ?? process.env.WAN_API_KEY;
+    this.imageProvider = opts?.imageProvider ?? (wanKey ? "wan" : "openrouter");
+
+    this.wanClient = wanKey
+      ? new WanImageClient(wanKey, opts?.wanModel)
+      : null;
   }
 
   async breakdownShots(script: Script): Promise<Shot[]> {
@@ -100,19 +120,14 @@ export class StoryboardEngine {
     const rawShots = JSON.parse(jsonMatch[1]!.trim()) as Omit<Shot, "gen_mode" | "image_path">[];
     return rawShots.map((s) => ({
       ...s,
-      // Backward compat: ensure description is populated from scene if missing
       description: s.description || s.scene || "",
       scene: s.scene || s.description || "",
-      // Populate dialogue from audio.dialogue for backward compat
       dialogue: s.dialogue ?? s.audio?.dialogue ?? null,
       image_path: null,
       ...this.assignGenMode(s.shot_number, s.duration),
     }));
   }
 
-  /**
-   * Determine gen_mode and create sub_segments if needed.
-   */
   private assignGenMode(
     shotNumber: number,
     duration: number
@@ -141,10 +156,6 @@ export class StoryboardEngine {
     return { gen_mode: "frame_stitch", ref_images: [], sub_segments: subSegments };
   }
 
-  /**
-   * Build an enriched image prompt incorporating camera, lighting, and mood.
-   * Truncated to 1000 chars max to avoid excessively long prompts when multiple styles are combined.
-   */
   private buildImagePrompt(shot: Shot): string {
     const parts = [shot.image_prompt];
 
@@ -167,12 +178,66 @@ export class StoryboardEngine {
     }
 
     const result = parts.join(". ");
-    return result.length > 1000 ? result.slice(0, 1000) : result;
+    return result.length > 2000 ? result.slice(0, 2000) : result;
   }
 
   /**
-   * Extract image buffer from OpenRouter API response.
+   * Build a character consistency prefix for Wan image prompts.
+   * Includes detailed appearance description to anchor the character across all shots.
    */
+  private buildCharacterConsistencyPrompt(): string {
+    const lines = [
+      `角色外貌（所有镜头必须严格保持一致）：${this.dossier.appearance}`,
+    ];
+    if (this.dossier.basics.name) {
+      lines.push(`角色名：${this.dossier.basics.name}`);
+    }
+    return lines.join("\n");
+  }
+
+  // ---- Wan2.7 image generation ----
+
+  private async generateImageViaWan(shot: Shot): Promise<Buffer> {
+    if (!this.wanClient) throw new Error("WAN_API_KEY not configured");
+
+    const characterPrompt = this.buildCharacterConsistencyPrompt();
+    const scenePrompt = this.buildImagePrompt(shot);
+    const fullPrompt = `${characterPrompt}\n\n画面描述：${scenePrompt}`;
+
+    const referenceImages: string[] = [];
+    if (this.character.characterDesignSheetUrl) {
+      referenceImages.push(this.character.characterDesignSheetUrl);
+    }
+
+    return this.wanClient.generate(fullPrompt, {
+      referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+      size: "1K",
+    });
+  }
+
+  private async generateKeyframeViaWan(
+    shot: Shot,
+    timePointDescription: string
+  ): Promise<Buffer> {
+    if (!this.wanClient) throw new Error("WAN_API_KEY not configured");
+
+    const characterPrompt = this.buildCharacterConsistencyPrompt();
+    const scenePrompt = this.buildImagePrompt(shot);
+    const fullPrompt = `${characterPrompt}\n\n画面描述：${scenePrompt}\n\n当前时刻：${timePointDescription}`;
+
+    const referenceImages: string[] = [];
+    if (this.character.characterDesignSheetUrl) {
+      referenceImages.push(this.character.characterDesignSheetUrl);
+    }
+
+    return this.wanClient.generate(fullPrompt, {
+      referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+      size: "1K",
+    });
+  }
+
+  // ---- OpenRouter image generation (legacy) ----
+
   private async extractImageFromResponse(data: any): Promise<Buffer> {
     const message = data.choices?.[0]?.message;
 
@@ -184,7 +249,7 @@ export class StoryboardEngine {
           return Buffer.from(base64, "base64");
         }
         if (url) {
-          const imgRes = await fetch(url);
+          const imgRes = await safeFetch(url);
           return Buffer.from(await imgRes.arrayBuffer());
         }
       }
@@ -199,7 +264,7 @@ export class StoryboardEngine {
             const base64 = url.split(",")[1]!;
             return Buffer.from(base64, "base64");
           }
-          const imgRes = await fetch(url);
+          const imgRes = await safeFetch(url);
           return Buffer.from(await imgRes.arrayBuffer());
         }
       }
@@ -215,10 +280,7 @@ export class StoryboardEngine {
     throw new Error("Could not extract image from AI response");
   }
 
-  /**
-   * Call OpenRouter image generation API and return the image buffer.
-   */
-  private async callImageApi(promptText: string): Promise<Buffer> {
+  private async callOpenRouterImageApi(promptText: string): Promise<Buffer> {
     const content: Array<Record<string, unknown>> = [
       { type: "text", text: promptText },
     ];
@@ -230,14 +292,14 @@ export class StoryboardEngine {
       });
     }
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const res = await safeFetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.ai.apiKey}`,
       },
       body: JSON.stringify({
-        model: IMAGE_MODEL,
+        model: OPENROUTER_IMAGE_MODEL,
         messages: [{ role: "user", content }],
       }),
     });
@@ -251,21 +313,40 @@ export class StoryboardEngine {
     return this.extractImageFromResponse(data);
   }
 
-  async generateImage(shot: Shot): Promise<Buffer> {
+  private async generateImageViaOpenRouter(shot: Shot): Promise<Buffer> {
     const enrichedPrompt = this.buildImagePrompt(shot);
-    return this.callImageApi(
+    return this.callOpenRouterImageApi(
       `Generate an image based on this character design reference. Keep the character appearance consistent with the reference. Prompt: ${enrichedPrompt}`
     );
+  }
+
+  private async generateKeyframeViaOpenRouter(
+    shot: Shot,
+    timePointDescription: string
+  ): Promise<Buffer> {
+    const enrichedPrompt = this.buildImagePrompt(shot);
+    return this.callOpenRouterImageApi(
+      `Generate an image based on this character design reference. Keep the character appearance consistent with the reference. This is a keyframe at a specific moment. Prompt: ${enrichedPrompt}. Moment: ${timePointDescription}`
+    );
+  }
+
+  // ---- Unified image generation dispatch ----
+
+  async generateImage(shot: Shot): Promise<Buffer> {
+    if (this.imageProvider === "wan") {
+      return this.generateImageViaWan(shot);
+    }
+    return this.generateImageViaOpenRouter(shot);
   }
 
   private async generateKeyframe(
     shot: Shot,
     timePointDescription: string
   ): Promise<Buffer> {
-    const enrichedPrompt = this.buildImagePrompt(shot);
-    return this.callImageApi(
-      `Generate an image based on this character design reference. Keep the character appearance consistent with the reference. This is a keyframe at a specific moment. Prompt: ${enrichedPrompt}. Moment: ${timePointDescription}`
-    );
+    if (this.imageProvider === "wan") {
+      return this.generateKeyframeViaWan(shot, timePointDescription);
+    }
+    return this.generateKeyframeViaOpenRouter(shot, timePointDescription);
   }
 
   private async generateKeyframeDescriptions(
@@ -369,9 +450,6 @@ export class StoryboardEngine {
     };
   }
 
-  /**
-   * Generate a markdown representation of the storyboard.
-   */
   static toMarkdown(storyboard: Storyboard): string {
     let md = `# ${storyboard.title} — 分镜表\n\n`;
 

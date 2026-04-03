@@ -21,3 +21,5 @@ export { StoryboardEngine } from "./storyboard/index.js";
 export type { Shot, Storyboard, SubSegment, CameraInfo, LightingInfo, AudioInfo } from "./storyboard/index.js";
 export { VideoEngine } from "./video/index.js";
 export type { VideoClip, VideoOutput } from "./video/index.js";
+export { DreamFactoryAgent, ProjectState, AGENT_TOOLS } from "./agent/index.js";
+export type { AgentCallbacks, ProjectStatus, DirectorStyleData, ToolContext } from "./agent/index.js";

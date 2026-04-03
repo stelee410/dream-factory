@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { safeFetch } from "../api.js";
 import type { Storyboard } from "../storyboard/index.js";
 import type { Shot, SubSegment } from "../storyboard/types.js";
 import type { VideoClip, VideoOutput } from "./types.js";
@@ -58,7 +59,7 @@ export class VideoEngine {
       duration,
     };
 
-    const res = await fetch(SEEDANCE_ENDPOINT, {
+    const res = await safeFetch(SEEDANCE_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -114,7 +115,7 @@ export class VideoEngine {
       duration,
     };
 
-    const res = await fetch(SEEDANCE_ENDPOINT, {
+    const res = await safeFetch(SEEDANCE_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -145,7 +146,7 @@ export class VideoEngine {
     while (Date.now() - start < maxWaitMs) {
       await new Promise((r) => setTimeout(r, interval));
 
-      const res = await fetch(pollUrl, {
+      const res = await safeFetch(pollUrl, {
         headers: { Authorization: `Bearer ${this.apiKey}` },
       });
 
@@ -182,7 +183,7 @@ export class VideoEngine {
    * Download video from URL.
    */
   private async downloadVideo(url: string): Promise<Buffer> {
-    const res = await fetch(url);
+    const res = await safeFetch(url);
     if (!res.ok) throw new Error(`Failed to download video (${res.status})`);
     return Buffer.from(await res.arrayBuffer());
   }
@@ -349,5 +350,68 @@ export class VideoEngine {
 
     const totalDuration = clips.reduce((s, c) => s + c.duration, 0);
     return { clips, final_path: finalPath, total_duration: totalDuration };
+  }
+
+  /**
+   * Regenerate video for a single shot from the storyboard.
+   */
+  async generateShotVideoPublic(
+    shot: Shot,
+    outDir: string,
+    onProgress?: (phase: string) => void
+  ): Promise<string> {
+    mkdirSync(outDir, { recursive: true });
+    if (!shot.image_path) {
+      throw new Error(`Shot #${shot.shot_number} has no image_path`);
+    }
+
+    if (shot.gen_mode === "frame_stitch" && shot.sub_segments && shot.sub_segments.length > 0) {
+      return this.generateFrameStitchVideo(
+        {
+          shot_number: shot.shot_number,
+          description: shot.description,
+          scene: shot.scene,
+          camera: shot.camera,
+          duration: shot.duration,
+          sub_segments: shot.sub_segments,
+        },
+        outDir,
+        (segIdx, totalSegs, phase) => onProgress?.(`${phase}_seg_${segIdx}/${totalSegs}`)
+      );
+    }
+
+    return this.generateSingleRefVideo(
+      {
+        image_path: shot.image_path,
+        description: shot.description,
+        scene: shot.scene,
+        camera: shot.camera,
+        duration: shot.duration,
+        shot_number: shot.shot_number,
+      },
+      outDir,
+      onProgress
+    );
+  }
+
+  /**
+   * Re-concatenate existing shot clips into final.mp4.
+   */
+  recombineFinal(storyboard: Storyboard, outDir: string): string {
+    const clipPaths: string[] = [];
+    for (const shot of storyboard.shots) {
+      const clipPath = join(outDir, `shot_${String(shot.shot_number).padStart(2, "0")}.mp4`);
+      if (existsSync(clipPath)) {
+        clipPaths.push(clipPath);
+      }
+    }
+
+    const finalPath = join(outDir, "final.mp4");
+    if (clipPaths.length > 1) {
+      this.concatenate(clipPaths, finalPath);
+    } else if (clipPaths.length === 1) {
+      copyFileSync(clipPaths[0]!, finalPath);
+    }
+    return finalPath;
   }
 }

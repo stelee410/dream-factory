@@ -2,6 +2,14 @@
 import "dotenv/config";
 import React from "react";
 import { render } from "ink";
-import { App } from "./App.js";
 
-render(<App />);
+const args = process.argv.slice(2);
+
+if (args[0] === "agent") {
+  const { AgentChat } = await import("./AgentChat.js");
+  const projectDirArg = args[1]; // undefined, "last", or a path
+  render(<AgentChat projectDirArg={projectDirArg} />);
+} else {
+  const { App } = await import("./App.js");
+  render(<App />);
+}

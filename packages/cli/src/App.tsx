@@ -110,8 +110,13 @@ export function App() {
           setCharacter(c);
           if (!df.ai) return;
           setInterviewEngine(new InterviewEngine(df.ai, c));
-          // Create the unified project directory
-          setProjectDir(makeProjectDir());
+          const dir = makeProjectDir();
+          setProjectDir(dir);
+          writeFileSync(
+            join(dir, "character.json"),
+            JSON.stringify(c, null, 2),
+            "utf-8"
+          );
           setScreen("interview");
         }}
       />

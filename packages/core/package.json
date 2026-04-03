@@ -13,7 +13,8 @@
     "./interview": "./dist/interview/index.js",
     "./script": "./dist/script/index.js",
     "./storyboard": "./dist/storyboard/index.js",
-    "./video": "./dist/video/index.js"
+    "./video": "./dist/video/index.js",
+    "./agent": "./dist/agent/index.js"
   },
   "scripts": {
     "build": "tsc",

@@ -7,12 +7,14 @@
     "dreamfactory": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts"
   ],
   "scripts": {
     "build": "pnpm -r build",
     "build:bundle": "tsup",
     "prepare": "tsup",
+    "postinstall": "node scripts/postinstall.js",
     "dev": "pnpm --filter @dreamfactory/cli dev",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean"

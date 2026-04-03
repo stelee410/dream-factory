@@ -10,7 +10,7 @@ AI-powered short drama generator for digital characters. Connect to [linkyun.co]
 npm install -g github:stelee410/dream-factory
 ```
 
-After installation, `dreamfactory` command is available globally.
+After installation, `dreamfactory` command is available globally. A global config template is automatically created at `~/.dreamfactory/.env`.
 
 ### Prerequisites
 
@@ -21,14 +21,16 @@ After installation, `dreamfactory` command is available globally.
 
 ### Configure
 
-Create a `.env` file in your working directory:
-
 ```bash
-LINKYUN_API_BASE=https://linkyun.co
-OPENROUTER_API_KEY=sk-or-v1-xxx
-SEEDANCE_API_KEY=xxx
-WAN_API_KEY=xxx
+# Interactive setup — prompts for API keys, saves to ~/.dreamfactory/.env
+dreamfactory init
 ```
+
+Config loading priority (higher overrides lower):
+1. **Local `.env`** in the current working directory
+2. **Global `~/.dreamfactory/.env`** shared across all workspaces
+
+You only need a local `.env` if you want to override the global config for a specific workspace.
 
 ## Usage
 
@@ -41,6 +43,9 @@ dreamfactory last
 
 # Resume a specific project
 dreamfactory dreamfactory/projects/20260402_103410
+
+# Configure API keys
+dreamfactory init
 
 # Linear mode (guided step-by-step)
 dreamfactory linear

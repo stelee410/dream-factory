@@ -2,59 +2,72 @@
 
 AI-powered short drama generator for digital characters. Connect to [linkyun.co](https://linkyun.co) digital characters, interview them to build rich profiles, then generate scripts, storyboards, and videos.
 
-## Prerequisites
+## Install
+
+### One-command install from GitHub
+
+```bash
+npm install -g github:stelee410/dream-factory
+```
+
+After installation, `dreamfactory` command is available globally.
+
+### Prerequisites
 
 - **Node.js** >= 20
-- **pnpm** >= 9
 - **ffmpeg** (for video generation)
   - macOS: `brew install ffmpeg`
   - Linux: `apt install ffmpeg`
 
-## Setup
+### Configure
+
+Create a `.env` file in your working directory:
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your API keys:
-#   LINKYUN_API_BASE=https://linkyun.co
-#   OPENROUTER_API_KEY=sk-or-v1-xxx
+LINKYUN_API_BASE=https://linkyun.co
+OPENROUTER_API_KEY=sk-or-v1-xxx
+SEEDANCE_API_KEY=xxx
+WAN_API_KEY=xxx
 ```
 
-## Build
+## Usage
 
 ```bash
-pnpm build
-```
-
-## Run
-
-### Linear Mode (guided step-by-step)
-
-```bash
-pnpm dev
-# or
-node packages/cli/dist/index.js
-```
-
-### Agent Mode (AI-powered interactive assistant)
-
-```bash
-# New project
-node packages/cli/dist/index.js agent
+# Start a new project (agent mode)
+dreamfactory
 
 # Resume the most recent project
-node packages/cli/dist/index.js agent last
+dreamfactory last
 
-# Resume a specific project directory
-node packages/cli/dist/index.js agent .dreamfactory/projects/20260402_103410
+# Resume a specific project
+dreamfactory .dreamfactory/projects/20260402_103410
+
+# Linear mode (guided step-by-step)
+dreamfactory linear
+
+# Help
+dreamfactory --help
 ```
 
-Agent mode provides an AI assistant that can freely call pipeline tools based on natural language instructions. You can re-interview, change director styles, rewrite scripts, regenerate storyboards or videos at any point.
+The current directory is your workspace. Projects are saved under `.dreamfactory/projects/` in the current directory.
 
-Commands in agent mode: `/login`, `/status`, `/done` (end interview), `/quit`.
+### Agent Mode
+
+Agent mode provides an AI assistant that can freely call pipeline tools based on natural language instructions. You can re-interview, change director styles, rewrite scripts, regenerate individual storyboard images or video shots, reorder shots, and more.
+
+Input history is supported — use up/down arrow keys to navigate previous commands.
+
+Commands: `/status`, `/done` (end interview), `/quit`.
+
+### Development (from source)
+
+```bash
+git clone https://github.com/stelee410/dream-factory.git
+cd dream-factory
+pnpm install
+pnpm build
+npm link
+```
 
 ## Complete Flow
 

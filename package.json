@@ -1,16 +1,38 @@
 {
   "name": "dreamfactory",
   "version": "0.1.0",
-  "private": true,
   "description": "DreamFactory — AI-powered short drama generator for digital characters",
+  "type": "module",
+  "bin": {
+    "dreamfactory": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "pnpm -r build",
+    "build:bundle": "tsup",
+    "prepare": "tsup",
     "dev": "pnpm --filter @dreamfactory/cli dev",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean"
   },
   "engines": {
-    "node": ">=20",
-    "pnpm": ">=9"
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "dotenv": "^16.4.7",
+    "ink": "^5.1.0",
+    "ink-select-input": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.0"
   }
 }

@@ -14,6 +14,12 @@
 #   AGENT_FORCE         若为 1，则传入 --force
 #   LOCK_DIR            并发锁目录，避免上一轮 agent 未结束时再次启动
 #
+# 说明:
+#   Cursor Agent CLI 在终端中可能仍从 stdin 读入；若不在子进程中关闭 stdin，任务结束后进程
+#   可能一直等待输入，导致 mail-watch 无法释放锁并进入下一轮轮询。run_agent 已对子进程使用
+#   「</dev/null」避免挂起。若仍异常，请确认未对 agent 传入 --resume/--continue，必要时用
+#   timeout(1) 作为兜底。
+#
 # 用法:
 #   ./scripts/mail-watch-agent.sh
 
@@ -148,7 +154,8 @@ run_agent() {
   args+=("$PROMPT")
 
   echo "[mail-watch-agent] $(ts) 启动 Cursor Agent: $bin --print --trust --workspace ... (提示词已省略)"
-  "$bin" "${args[@]}"
+  # 关闭 stdin，避免 agent 在任务结束后仍等待终端输入而无法退出、阻塞外层轮询。
+  "$bin" "${args[@]}" </dev/null
 }
 
 tick() {

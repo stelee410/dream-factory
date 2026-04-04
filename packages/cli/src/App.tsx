@@ -19,6 +19,7 @@ import type {
   Storyboard,
   VideoOutput,
 } from "@dreamfactory/core";
+import { SplashBranding, StartupSplash } from "./screens/StartupSplash.js";
 import { Login } from "./screens/Login.js";
 import { CharacterSelect } from "./screens/CharacterSelect.js";
 import { Interview } from "./screens/Interview.js";
@@ -33,6 +34,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 type Screen =
+  | "splash"
   | "login"
   | "character-select"
   | "interview"
@@ -62,7 +64,7 @@ function makeProjectDir(): string {
 }
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>("login");
+  const [screen, setScreen] = useState<Screen>("splash");
   const [session, setSession] = useState<AuthSession | null>(null);
   const [character, setCharacter] = useState<CharacterProfile | null>(null);
   const [interviewEngine, setInterviewEngine] = useState<InterviewEngine | null>(null);
@@ -90,15 +92,34 @@ export function App() {
     []
   );
 
-  if (screen === "login") {
+  if (screen === "splash") {
     return (
-      <Login
-        df={df}
-        onSuccess={(s) => {
-          setSession(s);
-          setScreen("character-select");
+      <StartupSplash
+        onDone={() => {
+          if (df.auth.tryRestoreFromEnv()) {
+            setSession(df.auth.getSession()!);
+            setScreen("character-select");
+          } else {
+            setScreen("login");
+          }
         }}
       />
+    );
+  }
+
+  if (screen === "login") {
+    return (
+      <Box flexDirection="column">
+        <SplashBranding />
+        <Login
+          df={df}
+          compact
+          onSuccess={(s) => {
+            setSession(s);
+            setScreen("character-select");
+          }}
+        />
+      </Box>
     );
   }
 

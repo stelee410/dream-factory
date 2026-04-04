@@ -15,11 +15,20 @@ const ENV_KEYS = [
 
 function generateEnvContent(values: Record<string, string>): string {
   const lines = [
-    "# DreamFactory global configuration",
-    "# Local .env in working directory overrides these values",
+    "# DreamFactory — global configuration (~/.dreamfactory/.env)",
+    "# Local project .env overrides these (see repo .env.example).",
     "",
+    "# --- linkyun.co ---",
   ];
   for (const { key, prompt } of ENV_KEYS) {
+    if (key === "OPENROUTER_API_KEY") {
+      lines.push(
+        "",
+        "# LINKYUN_API_KEY / WORKSPACE / USERNAME: usually set by CLI login in project .env,",
+        "# not OpenRouter (sk-or-v1-) or Anthropic (sk-ant-) keys.",
+        ""
+      );
+    }
     lines.push(`# ${prompt}`);
     lines.push(`${key}=${values[key] ?? ""}`);
     lines.push("");

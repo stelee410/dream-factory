@@ -1,7 +1,7 @@
 export { DreamFactory } from "./context.js";
 export type { DreamFactoryConfig } from "./context.js";
 export { AuthClient } from "./auth/index.js";
-export type { LoginRequest, LoginResponse, AuthSession } from "./auth/index.js";
+export type { LoginRequest, LoginResponse, AuthSession, WorkspaceInfo, SwitchWorkspaceResponse } from "./auth/index.js";
 export { CharacterClient } from "./character/index.js";
 export type {
   Agent,

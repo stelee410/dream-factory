@@ -37,3 +37,15 @@ export interface AuthSession {
   username: string;
   workspaceCode: string;
 }
+
+export interface WorkspaceInfo {
+  id: number;
+  name: string;
+  code: string;
+  status: string;
+}
+
+export interface SwitchWorkspaceResponse {
+  api_key: string;
+  workspace: WorkspaceInfo;
+}

@@ -12,19 +12,26 @@ if (existsSync(GLOBAL_ENV)) {
 
 mkdirSync(GLOBAL_DIR, { recursive: true });
 
-const content = `# DreamFactory global configuration
-# Local .env in working directory overrides these values
+const content = `# DreamFactory — global configuration (~/.dreamfactory/.env)
+# A local .env in your project directory overrides keys below (see .env.example in repo).
 
-# Linkyun API Base URL
+# --- linkyun.co ---
 LINKYUN_API_BASE=https://linkyun.co
 
-# OpenRouter API Key (for AI generation)
+# Session keys are normally written by CLI login to your project .env, not here.
+# Uncomment only if you want the same linkyun session in every workspace:
+# LINKYUN_API_KEY=
+# LINKYUN_WORKSPACE_CODE=
+# LINKYUN_USERNAME=
+
+# --- Third-party APIs ---
+# OpenRouter (text / agent): https://openrouter.ai/keys
 OPENROUTER_API_KEY=
 
-# Seedance API Key (for video generation)
+# Seedance (video)
 SEEDANCE_API_KEY=
 
-# Wan2.7 API Key (for storyboard images)
+# Wan (storyboard images)
 WAN_API_KEY=
 `;
 

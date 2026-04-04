@@ -8,6 +8,14 @@ import {
   ProjectState,
 } from "@dreamfactory/core";
 import type { AgentCallbacks } from "@dreamfactory/core";
+import { SplashBranding } from "./screens/StartupSplash.js";
+import { Login } from "./screens/Login.js";
+import { WorkspaceSelect } from "./screens/WorkspaceSelect.js";
+import { removeLinkyunCredentialsFromLocalEnv } from "./linkyun-env.js";
+import {
+  buildSlashPalette,
+  isSlashPaletteActive,
+} from "./slash-palette.js";
 
 interface Props {
   projectDirArg?: string;
@@ -19,6 +27,16 @@ interface ChatMessage {
 }
 
 const MAX_HISTORY = 100;
+
+const PALETTE_DESC_MAX = 96;
+/** 仅输入 `/` 时最多展示的 AI 工具行数，避免占满屏幕 */
+const TOOL_PREVIEW_LIMIT = 12;
+
+function truncatePaletteDesc(s: string, max = PALETTE_DESC_MAX): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
 
 function useInputHistory() {
   const historyRef = useRef<string[]>([]);
@@ -72,100 +90,19 @@ function useInputHistory() {
   return { push, up, down, reset };
 }
 
-// ---- Login sub-screen (shown before agent chat) ----
-
-function AgentLogin({
-  df,
-  onSuccess,
-}: {
-  df: DreamFactory;
-  onSuccess: () => void;
-}) {
-  const { exit } = useApp();
-  const [field, setField] = useState<"username" | "password">("username");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useInput((_, key) => {
-    if (key.escape) exit();
-  });
-
-  const submit = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await df.auth.login({ username, password });
-      onSuccess();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "登录失败");
-      setLoading(false);
-    }
-  }, [df, username, password, onSuccess]);
-
-  if (loading) {
-    return (
-      <Box padding={1}>
-        <Text>
-          <Spinner type="dots" /> 正在登录...
-        </Text>
-      </Box>
-    );
-  }
-
-  return (
-    <Box flexDirection="column" padding={1}>
-      <Text bold color="cyan">
-        DreamFactory AI Agent — 登录
-      </Text>
-      <Text dimColor>连接到 linkyun.co</Text>
-      <Box height={1} />
-
-      {error && (
-        <Box>
-          <Text color="red">x {error}</Text>
-        </Box>
-      )}
-
-      <Box>
-        <Text>用户名: </Text>
-        {field === "username" ? (
-          <TextInput
-            value={username}
-            onChange={setUsername}
-            onSubmit={() => setField("password")}
-          />
-        ) : (
-          <Text>{username}</Text>
-        )}
-      </Box>
-
-      <Box>
-        <Text>密码: </Text>
-        {field === "password" ? (
-          <TextInput
-            value={password}
-            onChange={setPassword}
-            onSubmit={submit}
-            mask="*"
-          />
-        ) : (
-          <Text dimColor>{"·".repeat(password.length || 0)}</Text>
-        )}
-      </Box>
-
-      <Box height={1} />
-      <Text dimColor>按 Enter 继续，Esc 退出</Text>
-    </Box>
-  );
-}
-
 // ---- Main agent chat screen ----
 
 export function AgentChat({ projectDirArg }: Props) {
   const { exit } = useApp();
+  const [splashIntroDone, setSplashIntroDone] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [showWorkspaceSelect, setShowWorkspaceSelect] = useState(false);
+  const envRestoreAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSplashIntroDone(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
 
   const projectDir = useMemo(
     () => ProjectState.resolveProjectDir(projectDirArg),
@@ -193,6 +130,30 @@ export function AgentChat({ projectDirArg }: Props) {
   const [interviewMode, setInterviewMode] = useState(false);
   const [interviewCharacter, setInterviewCharacter] = useState<string | null>(null);
   const history = useInputHistory();
+  const [paletteHighlight, setPaletteHighlight] = useState(0);
+
+  const slashPalette = useMemo(
+    () => buildSlashPalette(input, interviewMode),
+    [input, interviewMode]
+  );
+
+  const slashPaletteOpen =
+    loggedIn && !loading && isSlashPaletteActive(input);
+
+  const slashPaletteVisible =
+    slashPaletteOpen &&
+    (slashPalette.commands.length > 0 || slashPalette.tools.length > 0);
+
+  const toolQuery = input.slice(1).trim().toLowerCase();
+  const toolsPreviewTruncated =
+    !toolQuery && slashPalette.tools.length > TOOL_PREVIEW_LIMIT;
+  const toolsToShow = toolsPreviewTruncated
+    ? slashPalette.tools.slice(0, TOOL_PREVIEW_LIMIT)
+    : slashPalette.tools;
+
+  useEffect(() => {
+    setPaletteHighlight(0);
+  }, [input]);
 
   const callbacks: AgentCallbacks = useMemo(
     () => ({
@@ -239,7 +200,8 @@ export function AgentChat({ projectDirArg }: Props) {
 
     welcomeLines.push({
       role: "system",
-      content: "/status 查看状态 | /quit 退出 | 直接输入消息与 AI 助手对话",
+      content:
+        "输入 / 打开命令与工具提示（Tab / ↑↓ 选择 · Enter 补全）；亦可自然语言与 AI 对话",
     });
 
     setMessages(welcomeLines);
@@ -248,6 +210,27 @@ export function AgentChat({ projectDirArg }: Props) {
   useInput((_, key) => {
     if (key.escape) exit();
     if (loading) return;
+
+    const pal = buildSlashPalette(input, interviewMode);
+    const paletteNav =
+      slashPaletteOpen && pal.commands.length > 0;
+
+    if (paletteNav) {
+      const n = pal.commands.length;
+      if (key.tab) {
+        setPaletteHighlight((h) => (h + (key.shift ? -1 : 1) + n) % n);
+        return;
+      }
+      if (key.upArrow) {
+        setPaletteHighlight((h) => (h - 1 + n) % n);
+        return;
+      }
+      if (key.downArrow) {
+        setPaletteHighlight((h) => (h + 1) % n);
+        return;
+      }
+    }
+
     if (key.upArrow) {
       const prev = history.up(input);
       if (prev !== null) setInput(prev);
@@ -268,6 +251,32 @@ export function AgentChat({ projectDirArg }: Props) {
 
       if (trimmed === "/quit" || trimmed === "/exit") {
         exit();
+        return;
+      }
+
+      if (trimmed === "/logout") {
+        df.auth.logout();
+        removeLinkyunCredentialsFromLocalEnv(process.cwd());
+        setMessages((prev) => [
+          ...prev,
+          { role: "system", content: "已退出登录，并已从当前目录 .env 移除 Linkyun 凭据。" },
+        ]);
+        setLoggedIn(false);
+        return;
+      }
+
+      if (trimmed === "/login") {
+        df.auth.logout();
+        setLoggedIn(false);
+        setMessages((prev) => [
+          ...prev,
+          { role: "system", content: "请重新登录（会话已清除，未自动修改 .env）。" },
+        ]);
+        return;
+      }
+
+      if (trimmed === "/workspace") {
+        setShowWorkspaceSelect(true);
         return;
       }
 
@@ -306,9 +315,79 @@ export function AgentChat({ projectDirArg }: Props) {
     [loading, df, agent, state, exit]
   );
 
-  // Show login screen first
+  const onChatInputChange = useCallback((v: string) => {
+    setInput(v.replace(/\t/g, ""));
+  }, []);
+
+  const onChatInputSubmit = useCallback(
+    (value: string) => {
+      if (loading) return;
+      const pal = buildSlashPalette(value, interviewMode);
+      const trimmedLead = value.trimStart();
+      if (
+        isSlashPaletteActive(value) &&
+        pal.commands.length > 0 &&
+        !pal.commands.some((c) => c.value === trimmedLead)
+      ) {
+        const n = pal.commands.length;
+        const pick = pal.commands[paletteHighlight % n]!;
+        setInput(pick.value);
+        return;
+      }
+      void handleSubmit(value);
+    },
+    [loading, interviewMode, paletteHighlight, handleSubmit]
+  );
+
+  useEffect(() => {
+    if (!splashIntroDone || loggedIn || envRestoreAttemptedRef.current) return;
+    envRestoreAttemptedRef.current = true;
+    if (df.auth.tryRestoreFromEnv()) {
+      setLoggedIn(true);
+    }
+  }, [splashIntroDone, loggedIn, df]);
+
   if (!loggedIn) {
-    return <AgentLogin df={df} onSuccess={() => setLoggedIn(true)} />;
+    return (
+      <Box flexDirection="column">
+        <SplashBranding />
+        {!splashIntroDone ? (
+          <Box paddingLeft={3} paddingBottom={1}>
+            <Text color="gray">
+              <Spinner type="dots" /> 正在就绪…
+            </Text>
+          </Box>
+        ) : (
+          <Login
+            df={df}
+            compact
+            onSuccess={() => setLoggedIn(true)}
+          />
+        )}
+      </Box>
+    );
+  }
+
+  if (showWorkspaceSelect) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <WorkspaceSelect
+          df={df}
+          onDone={(switched, session) => {
+            setShowWorkspaceSelect(false);
+            if (switched && session) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "system",
+                  content: `已切换工作区至 ${session.workspaceCode}`,
+                },
+              ]);
+            }
+          }}
+        />
+      </Box>
+    );
   }
 
   const visibleMessages = messages.slice(-20);
@@ -363,15 +442,82 @@ export function AgentChat({ projectDirArg }: Props) {
       )}
 
       {!loading && (
-        <Box>
-          <Text color="yellow" bold>
-            {">"}{" "}
-          </Text>
-          <TextInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSubmit}
-          />
+        <Box flexDirection="column">
+          {slashPaletteVisible && (
+            <Box
+              flexDirection="column"
+              borderStyle="round"
+              borderColor="gray"
+              paddingX={1}
+              paddingY={0}
+              marginBottom={1}
+            >
+              <Text dimColor>
+                命令与工具 · Tab / Shift+Tab / ↑↓ 选择斜杠命令 · Enter
+                补全 · 再 Enter 执行
+              </Text>
+              <Box height={1} />
+              {slashPalette.commands.length > 0 && (
+                <Box flexDirection="column">
+                  <Text bold color="cyan">
+                    斜杠命令
+                  </Text>
+                  {slashPalette.commands.map((c, i) => {
+                    const hi =
+                      slashPalette.commands.length > 0 &&
+                      i ===
+                        paletteHighlight %
+                          slashPalette.commands.length;
+                    return (
+                      <Box key={c.value} flexDirection="row" flexWrap="wrap">
+                        <Text color={hi ? "yellow" : "white"} bold={hi}>
+                          {hi ? "› " : "  "}
+                          {c.value}
+                        </Text>
+                        <Text dimColor>
+                          {" "}
+                          — {truncatePaletteDesc(c.description)}
+                        </Text>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              )}
+              {slashPalette.tools.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold color="magenta">
+                    AI 工具（口语描述即可，以下为内部名称）
+                  </Text>
+                  {toolsToShow.map((t) => (
+                    <Box key={t.name} flexDirection="column" marginBottom={0}>
+                      <Text color="cyan">{t.name}</Text>
+                      <Text dimColor>
+                        {"  "}
+                        {truncatePaletteDesc(t.description, 120)}
+                      </Text>
+                    </Box>
+                  ))}
+                  {toolsPreviewTruncated && (
+                    <Text dimColor>
+                      … 另有{" "}
+                      {slashPalette.tools.length - TOOL_PREVIEW_LIMIT}{" "}
+                      项，请继续输入以筛选（例如 /get、/video）
+                    </Text>
+                  )}
+                </Box>
+              )}
+            </Box>
+          )}
+          <Box>
+            <Text color="yellow" bold>
+              {">"}{" "}
+            </Text>
+            <TextInput
+              value={input}
+              onChange={onChatInputChange}
+              onSubmit={onChatInputSubmit}
+            />
+          </Box>
         </Box>
       )}
     </Box>

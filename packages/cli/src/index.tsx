@@ -2,6 +2,9 @@ import "./load-env.js";
 import React from "react";
 import { render } from "ink";
 
+declare const __DREAMFACTORY_VERSION__: string;
+const version = typeof __DREAMFACTORY_VERSION__ !== "undefined" ? __DREAMFACTORY_VERSION__ : "dev";
+
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -30,7 +33,7 @@ Projects are saved under dreamfactory/projects/ in the current directory.
 }
 
 if (command === "--version" || command === "-v") {
-  console.log("dreamfactory 0.1.0");
+  console.log(`dreamfactory ${version}`);
   process.exit(0);
 }
 

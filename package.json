@@ -1,6 +1,6 @@
 {
   "name": "dreamfactory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DreamFactory — AI-powered short drama generator for digital characters",
   "type": "module",
   "bin": {
@@ -28,7 +28,9 @@
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

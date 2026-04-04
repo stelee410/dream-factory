@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "tsup";
+
+const { version } = JSON.parse(readFileSync("./package.json", "utf-8"));
 
 const banner = `#!/usr/bin/env node
 import { createRequire as __createRequire } from 'module';
@@ -21,6 +24,9 @@ export default defineConfig({
   sourcemap: false,
   noExternal: [/.*/],
   banner: { js: banner },
+  define: {
+    __DREAMFACTORY_VERSION__: JSON.stringify(version),
+  },
   esbuildOptions(options) {
     options.alias = {
       "@dreamfactory/core": "./packages/core/src/index.ts",

@@ -4,7 +4,7 @@
 # 依赖: curl、python3；PATH 上需有 Cursor Agent CLI（通常为 `agent`，可通过环境变量指定）。
 #
 # 环境变量（均有与 AGENT.md 一致的默认值）:
-#   BROKER_URL          默认 http://127.0.0.1:9800
+#   BROKER_URL          默认 https://acp.linkyun.co
 #   INBOX_ADDRESS       默认 linkyun-dream-factory-coder@local
 #   AGENT_ID            默认 569e1858-b8ba-49a6-b458-ccbef6884e94
 #   WORKSPACE           默认本脚本所在仓库根目录（dream-factory）
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-BROKER_URL="${BROKER_URL:-http://127.0.0.1:9800}"
+BROKER_URL="${BROKER_URL:-https://acp.linkyun.co}"
 INBOX_ADDRESS="${INBOX_ADDRESS:-linkyun-dream-factory-coder@local}"
 AGENT_ID="${AGENT_ID:-569e1858-b8ba-49a6-b458-ccbef6884e94}"
 WORKSPACE="${WORKSPACE:-$REPO_ROOT}"

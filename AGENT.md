@@ -4,7 +4,7 @@
 - **Role**: coder
 - **Address**: linkyun-dream-factory-coder@local
 - **Agent ID**: 569e1858-b8ba-49a6-b458-ccbef6884e94
-- **Broker URL**: http://127.0.0.1:9800
+- **Broker URL**: https://acp.linkyun.co
 
 ## 身份提示词 (System Prompt)
 
@@ -21,26 +21,26 @@
 
 ### 收件 (读取任务)
 ```
-GET http://127.0.0.1:9800/messages/inbox/linkyun-dream-factory-coder@local?agent_id=569e1858-b8ba-49a6-b458-ccbef6884e94
+GET https://acp.linkyun.co/messages/inbox/linkyun-dream-factory-coder@local?agent_id=569e1858-b8ba-49a6-b458-ccbef6884e94
 ```
 
 ### 发件 (发送消息)
 ```
-POST http://127.0.0.1:9800/messages/send
+POST https://acp.linkyun.co/messages/send
 Body: {"agent_id": "569e1858-b8ba-49a6-b458-ccbef6884e94", "from_agent": "linkyun-dream-factory-coder@local", "to_agent": "<目标agent地址>", "action": "send|reply|forward", "subject": "...", "body": "...", "parent_id": "<可选>"}
 ```
 
 ### 标记已读
 ```
-PATCH http://127.0.0.1:9800/messages/{message_id}/read
+PATCH https://acp.linkyun.co/messages/{message_id}/read
 ```
 
 ### 查看会话线程
 ```
-GET http://127.0.0.1:9800/messages/thread/{thread_id}
+GET https://acp.linkyun.co/messages/thread/{thread_id}
 ```
 
 ### 查看所有 Agent
 ```
-GET http://127.0.0.1:9800/agents
+GET https://acp.linkyun.co/agents
 ```

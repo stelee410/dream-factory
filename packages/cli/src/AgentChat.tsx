@@ -6,6 +6,7 @@ import {
   DreamFactory,
   DreamFactoryAgent,
   ProjectState,
+  resolveLlmFromEnv,
 } from "@dreamfactory/core";
 import type { AgentCallbacks } from "@dreamfactory/core";
 import { SplashBranding } from "./screens/StartupSplash.js";
@@ -113,7 +114,7 @@ export function AgentChat({ projectDirArg }: Props) {
     () =>
       new DreamFactory({
         linkyunApiBase: process.env.LINKYUN_API_BASE ?? "https://linkyun.co",
-        openrouterApiKey: process.env.OPENROUTER_API_KEY,
+        llm: resolveLlmFromEnv() ?? undefined,
       }),
     []
   );
@@ -291,7 +292,7 @@ export function AgentChat({ projectDirArg }: Props) {
       if (!df.ai) {
         setMessages((prev) => [
           ...prev,
-          { role: "system", content: "错误: 缺少 OPENROUTER_API_KEY 环境变量。" },
+          { role: "system", content: "错误: 缺少 LLM_API_KEY（或未设置兼容项 OPENROUTER_API_KEY）。" },
         ]);
         return;
       }

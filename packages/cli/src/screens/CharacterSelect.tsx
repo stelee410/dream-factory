@@ -7,9 +7,11 @@ import type { DreamFactory, CharacterProfile, Agent } from "@dreamfactory/core";
 interface Props {
   df: DreamFactory;
   onSelect: (character: CharacterProfile) => void;
+  /** 按 w 打开工作区切换（linear 模式） */
+  onOpenWorkspaceSwitch?: () => void;
 }
 
-export function CharacterSelect({ df, onSelect }: Props) {
+export function CharacterSelect({ df, onSelect, onOpenWorkspaceSwitch }: Props) {
   const { exit } = useApp();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +19,9 @@ export function CharacterSelect({ df, onSelect }: Props) {
 
   useInput((input, key) => {
     if (key.escape) exit();
+    if (onOpenWorkspaceSwitch && input === "w") {
+      onOpenWorkspaceSwitch();
+    }
   });
 
   useEffect(() => {
@@ -76,6 +81,11 @@ export function CharacterSelect({ df, onSelect }: Props) {
         🎬 DreamFactory — Select Character
       </Text>
       <Text dimColor>Choose a digital character for your short drama</Text>
+      {onOpenWorkspaceSwitch ? (
+        <Text dimColor>
+          当前工作区: {df.auth.getSession()?.workspaceCode ?? "—"} · 按 w 切换
+        </Text>
+      ) : null}
       <Box height={1} />
       <SelectInput items={items} onSelect={handleSelect} />
     </Box>

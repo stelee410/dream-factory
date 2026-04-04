@@ -17,7 +17,9 @@
     "postinstall": "node scripts/postinstall.js",
     "dev": "pnpm --filter @dreamfactory/cli dev",
     "lint": "pnpm -r lint",
-    "clean": "pnpm -r clean"
+    "clean": "pnpm -r clean",
+    "test:core": "pnpm --filter @dreamfactory/core build && pnpm --filter @dreamfactory/core test",
+    "test:core:video-live": "pnpm --filter @dreamfactory/core build && RUN_OPENROUTER_VIDEO_INTEGRATION=1 pnpm --filter @dreamfactory/core test"
   },
   "engines": {
     "node": ">=20"

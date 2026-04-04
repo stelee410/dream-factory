@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "node --test dist/video/openrouter-video-response.test.js dist/video/openrouter-video-integration.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7"

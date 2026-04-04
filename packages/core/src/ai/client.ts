@@ -8,17 +8,18 @@ import type {
   ToolChatResponse,
 } from "./types.js";
 import { safeFetch } from "../api.js";
-
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
+import type { LlmClientConfig } from "./llm-config.js";
+import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "./llm-config.js";
 
 export class AIClient {
   readonly apiKey: string;
+  private readonly baseUrl: string;
   private model: string;
 
-  constructor(apiKey: string, model?: string) {
-    this.apiKey = apiKey;
-    this.model = model ?? DEFAULT_MODEL;
+  constructor(config: LlmClientConfig) {
+    this.apiKey = config.apiKey;
+    this.baseUrl = (config.baseUrl || DEFAULT_LLM_BASE_URL).replace(/\/$/, "");
+    this.model = config.model || DEFAULT_LLM_MODEL;
   }
 
   async chat(
@@ -32,7 +33,7 @@ export class AIClient {
       max_tokens: opts?.max_tokens ?? 4096,
     };
 
-    const res = await safeFetch(`${OPENROUTER_BASE}/chat/completions`, {
+    const res = await safeFetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -43,7 +44,7 @@ export class AIClient {
 
     if (!res.ok) {
       const err = await res.text().catch(() => "");
-      throw new Error(`OpenRouter API error (${res.status}): ${err}`);
+      throw new Error(`LLM API error (${res.status}): ${err}`);
     }
 
     const data = (await res.json()) as ChatResponse;
@@ -71,7 +72,7 @@ export class AIClient {
       max_tokens: opts?.max_tokens ?? 4096,
     };
 
-    const res = await safeFetch(`${OPENROUTER_BASE}/chat/completions`, {
+    const res = await safeFetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -82,7 +83,7 @@ export class AIClient {
 
     if (!res.ok) {
       const err = await res.text().catch(() => "");
-      throw new Error(`OpenRouter API error (${res.status}): ${err}`);
+      throw new Error(`LLM API error (${res.status}): ${err}`);
     }
 
     return (await res.json()) as ToolChatResponse;

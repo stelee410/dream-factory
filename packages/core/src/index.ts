@@ -9,7 +9,8 @@ export type {
   AgentListResponse,
   CharacterProfile,
 } from "./character/index.js";
-export { AIClient } from "./ai/index.js";
+export { AIClient, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, resolveLlmFromEnv } from "./ai/index.js";
+export type { LlmClientConfig } from "./ai/index.js";
 export type { ChatMessage, ChatRequest, ChatResponse } from "./ai/index.js";
 export { InterviewEngine } from "./interview/index.js";
 export type { CharacterDossier } from "./interview/index.js";

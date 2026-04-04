@@ -113,7 +113,7 @@ export function WorkspaceSelect({ df, onDone }: Props) {
   }
 
   const items = workspaces.map((w) => ({
-    label: `${w.name} (${w.code})${w.code === currentCode ? " ← 当前" : ""}`,
+    label: `${w.name} (${w.code})${w.role ? ` · ${w.role}` : ""}${w.code === currentCode ? " ← 当前" : ""}`,
     value: w.code,
   }));
 

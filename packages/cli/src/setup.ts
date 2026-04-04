@@ -8,7 +8,13 @@ const GLOBAL_ENV = join(GLOBAL_DIR, ".env");
 
 const ENV_KEYS = [
   { key: "LINKYUN_API_BASE", prompt: "Linkyun API Base URL", defaultVal: "https://linkyun.co" },
-  { key: "OPENROUTER_API_KEY", prompt: "OpenRouter API Key (for AI generation)", defaultVal: "" },
+  {
+    key: "LLM_BASE_URL",
+    prompt: "LLM API base URL (OpenAI-compatible)",
+    defaultVal: "https://openrouter.ai/api/v1",
+  },
+  { key: "LLM_MODEL", prompt: "LLM model id", defaultVal: "anthropic/claude-sonnet-4" },
+  { key: "LLM_API_KEY", prompt: "LLM API key (e.g. OpenRouter)", defaultVal: "" },
   { key: "SEEDANCE_API_KEY", prompt: "Seedance API Key (for video generation)", defaultVal: "" },
   { key: "WAN_API_KEY", prompt: "Wan2.7 API Key (for storyboard images)", defaultVal: "" },
 ];
@@ -21,11 +27,11 @@ function generateEnvContent(values: Record<string, string>): string {
     "# --- linkyun.co ---",
   ];
   for (const { key, prompt } of ENV_KEYS) {
-    if (key === "OPENROUTER_API_KEY") {
+    if (key === "LLM_BASE_URL") {
       lines.push(
         "",
         "# LINKYUN_API_KEY / WORKSPACE / USERNAME: usually set by CLI login in project .env,",
-        "# not OpenRouter (sk-or-v1-) or Anthropic (sk-ant-) keys.",
+        "# not LLM/OpenRouter (sk-or-v1-) or Anthropic (sk-ant-) keys.",
         ""
       );
     }
@@ -91,7 +97,14 @@ export async function interactiveSetup(): Promise<void> {
   const values: Record<string, string> = {};
 
   for (const { key, prompt, defaultVal } of ENV_KEYS) {
-    const current = existing[key] ?? defaultVal;
+    let current = existing[key] ?? defaultVal;
+    if (
+      key === "LLM_API_KEY" &&
+      !String(current).trim() &&
+      existing["OPENROUTER_API_KEY"]?.trim()
+    ) {
+      current = existing["OPENROUTER_API_KEY"]!;
+    }
     const display = key.includes("KEY") && current && current !== defaultVal
       ? current.slice(0, 8) + "..."
       : current;

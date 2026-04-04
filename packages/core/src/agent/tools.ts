@@ -324,7 +324,7 @@ function startInterview(ctx: ToolContext): string {
     return "错误: 尚未选择角色。请先调用 select_character。";
   }
   if (!ctx.df.ai) {
-    return "错误: AI 客户端未初始化（缺少 OPENROUTER_API_KEY）。";
+    return "错误: AI 客户端未初始化（缺少 LLM_API_KEY，或沿用 OPENROUTER_API_KEY）。";
   }
   const engine = new InterviewEngine(ctx.df.ai, ctx.state.character);
   ctx.onInterviewStart(engine);

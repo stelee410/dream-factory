@@ -49,13 +49,15 @@ Prefer signing in inside the CLI and choosing to save the session to the local `
 
 | Key | Purpose |
 |-----|---------|
-| `OPENROUTER_API_KEY` | Agent + text models via [OpenRouter](https://openrouter.ai) |
+| `LLM_BASE_URL` | Base URL for OpenAI-compatible chat API (default `https://openrouter.ai/api/v1`) |
+| `LLM_MODEL` | Model id (default `anthropic/claude-sonnet-4`) |
+| `LLM_API_KEY` | API key for that endpoint. If unset, `OPENROUTER_API_KEY` is still accepted. |
 | `WAN_API_KEY` | Storyboard images (Alibaba Wan2.7), optional |
 | `SEEDANCE_API_KEY` | Video generation (Seedance), optional |
 
 ### Global interactive setup
 
-Prompts for the global file keys (OpenRouter, Wan, Seedance, and base URL — not linkyun session):
+Prompts for the global file keys (LLM, Wan, Seedance, and base URL — not linkyun session):
 
 ```bash
 dreamfactory init

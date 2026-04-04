@@ -74,16 +74,18 @@ export class AuthClient {
 
   async listWorkspaces(): Promise<WorkspaceInfo[]> {
     if (!this.session) throw new Error("Not logged in");
-    return apiRequest<WorkspaceInfo[]>(
-      `${this.baseUrl}/api/v1/workspaces`,
+    const data = await apiRequest<{ workspaces: WorkspaceInfo[]; total?: number }>(
+      `${this.baseUrl}/api/v1/user/workspaces`,
       { headers: this.getHeaders() }
     );
+    return data.workspaces ?? [];
   }
 
   async switchWorkspace(workspaceCode: string): Promise<AuthSession> {
     if (!this.session) throw new Error("Not logged in");
+    const prev = this.session;
     const data = await apiRequest<SwitchWorkspaceResponse>(
-      `${this.baseUrl}/api/v1/auth/switch-workspace`,
+      `${this.baseUrl}/api/v1/user/workspace/switch`,
       {
         method: "POST",
         headers: {
@@ -94,8 +96,8 @@ export class AuthClient {
       }
     );
     this.session = {
-      apiKey: data.api_key,
-      username: this.session.username,
+      apiKey: prev.apiKey,
+      username: prev.username,
       workspaceCode: data.workspace.code,
     };
     return this.session;

@@ -24,9 +24,11 @@ LINKYUN_API_BASE=https://linkyun.co
 # LINKYUN_WORKSPACE_CODE=
 # LINKYUN_USERNAME=
 
-# --- Third-party APIs ---
-# OpenRouter (text / agent): https://openrouter.ai/keys
-OPENROUTER_API_KEY=
+# --- LLM (OpenAI-compatible chat; defaults target OpenRouter) ---
+# https://openrouter.ai/keys — or any gateway with /v1/chat/completions
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=anthropic/claude-sonnet-4
+LLM_API_KEY=
 
 # Seedance (video)
 SEEDANCE_API_KEY=

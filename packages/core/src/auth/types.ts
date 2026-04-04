@@ -43,9 +43,12 @@ export interface WorkspaceInfo {
   name: string;
   code: string;
   status: string;
+  /** GET /api/v1/user/workspaces 含成员角色时存在 */
+  role?: string;
 }
 
+/** POST /api/v1/user/workspace/switch — 会话 API Key 不变，仅切换 X-Workspace-Code 上下文 */
 export interface SwitchWorkspaceResponse {
-  api_key: string;
   workspace: WorkspaceInfo;
+  message?: string;
 }

@@ -8,6 +8,7 @@ import {
   VideoEngine,
   mergeDirectorStyles,
   describeDirectorStyles,
+  resolveLlmFromEnv,
 } from "@dreamfactory/core";
 import type {
   AuthSession,
@@ -22,6 +23,7 @@ import type {
 import { SplashBranding, StartupSplash } from "./screens/StartupSplash.js";
 import { Login } from "./screens/Login.js";
 import { CharacterSelect } from "./screens/CharacterSelect.js";
+import { WorkspaceSelect } from "./screens/WorkspaceSelect.js";
 import { Interview } from "./screens/Interview.js";
 import { DossierView } from "./screens/DossierView.js";
 import { ThemeInput } from "./screens/ThemeInput.js";
@@ -82,12 +84,13 @@ export function App() {
 
   // Unified project directory — created once per run
   const [projectDir, setProjectDir] = useState("");
+  const [workspacePicker, setWorkspacePicker] = useState(false);
 
   const df = useMemo(
     () =>
       new DreamFactory({
         linkyunApiBase: process.env.LINKYUN_API_BASE ?? "https://linkyun.co",
-        openrouterApiKey: process.env.OPENROUTER_API_KEY,
+        llm: resolveLlmFromEnv() ?? undefined,
       }),
     []
   );
@@ -124,9 +127,26 @@ export function App() {
   }
 
   if (screen === "character-select") {
+    if (workspacePicker) {
+      return (
+        <Box flexDirection="column" padding={1}>
+          <WorkspaceSelect
+            df={df}
+            onDone={(switched, newSession) => {
+              setWorkspacePicker(false);
+              if (switched && newSession) {
+                setSession(newSession);
+              }
+            }}
+          />
+        </Box>
+      );
+    }
     return (
       <CharacterSelect
+        key={session?.workspaceCode ?? "ws"}
         df={df}
+        onOpenWorkspaceSwitch={() => setWorkspacePicker(true)}
         onSelect={(c) => {
           setCharacter(c);
           if (!df.ai) return;
@@ -331,7 +351,7 @@ export function App() {
 
   return (
     <Box padding={1}>
-      <Text color="red">Missing OPENROUTER_API_KEY in environment.</Text>
+      <Text color="red">缺少 LLM 配置：请设置 LLM_API_KEY（或沿用 OPENROUTER_API_KEY）。</Text>
     </Box>
   );
 }

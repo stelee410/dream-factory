@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+const { existsSync, mkdirSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const { homedir } = require("node:os");
 
 const GLOBAL_DIR = join(homedir(), ".dreamfactory");
 const GLOBAL_ENV = join(GLOBAL_DIR, ".env");

@@ -13,13 +13,16 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:bundle": "tsup",
-    "prepare": "[ -x ./node_modules/.bin/tsup ] && tsup || true",
-    "postinstall": "node scripts/postinstall.js",
+    "prepack": "tsup",
+    "postinstall": "node scripts/postinstall.cjs",
     "dev": "pnpm --filter @dreamfactory/cli dev",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean",
     "test:core": "pnpm --filter @dreamfactory/core build && pnpm --filter @dreamfactory/core test",
     "test:core:video-live": "pnpm --filter @dreamfactory/core build && RUN_OPENROUTER_VIDEO_INTEGRATION=1 pnpm --filter @dreamfactory/core test"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20"

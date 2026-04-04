@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm build
+
+      - name: Bundle CLI
+        run: pnpm build:bundle
+
+      - name: Run tests
+        run: pnpm test:core
+
+      - name: Create release tarball
+        run: |
+          mkdir -p release-staging
+          cp -r dist release-staging/
+          cp -r scripts release-staging/
+          cp package.json release-staging/
+          cp README.md release-staging/
+          tar czf dreamfactory.tar.gz -C release-staging .
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            dreamfactory.tar.gz \
+            --title "DreamFactory ${{ github.ref_name }}" \
+            --generate-notes

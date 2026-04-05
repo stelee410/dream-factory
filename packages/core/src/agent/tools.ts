@@ -55,9 +55,9 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     function: {
       name: "start_interview",
       description:
-        "开始与角色的访谈。支持两种模式：\n" +
-        "1) 交互模式（默认）：进入访谈模式，用户手动与角色对话，输入 /done 结束\n" +
-        "2) 自动模式（auto=true）：AI 自动扮演访谈者，围绕主题进行 5-10 轮对话，信息充足后自动生成角色档案。适合邮件驱动的无人值守场景。",
+        "开始与角色的访谈。**推荐始终使用 auto=true**。\n" +
+        "- 自动模式（auto=true，推荐默认）：AI 自动扮演访谈者，围绕主题进行 5-10 轮对话，信息充足后自动生成角色档案。无需用户手动输入。\n" +
+        "- 交互模式（auto=false）：仅当用户明确要求亲自与角色对话时使用。",
       parameters: {
         type: "object",
         properties: {

@@ -175,7 +175,7 @@ export class DreamFactoryAgent {
       },
       onProgress: (msg) => this.callbacks.onToolProgress(msg),
       skills: this.skills,
-      workingDir: this.state.projectDir,
+      workingDir: process.cwd(),
       loopScheduler: this.loopScheduler,
     };
 

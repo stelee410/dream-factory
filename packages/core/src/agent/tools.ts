@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, relative, isAbsolute, dirname } from "node:path";
 import { execSync } from "node:child_process";
-import type { ToolDefinition } from "../ai/index.js";
+import type { ToolDefinition, ChatMessage } from "../ai/index.js";
+import { AIClient } from "../ai/index.js";
 import type { DreamFactory } from "../context.js";
 import type { CharacterProfile } from "../character/index.js";
 import type { Outline } from "../script/index.js";
@@ -53,8 +54,18 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "start_interview",
-      description: "开始/重新开始与角色的访谈。进入访谈模式后，用户的消息会直接与角色对话。需要先选择角色。",
-      parameters: { type: "object", properties: {}, required: [] },
+      description:
+        "开始与角色的访谈。支持两种模式：\n" +
+        "1) 交互模式（默认）：进入访谈模式，用户手动与角色对话，输入 /done 结束\n" +
+        "2) 自动模式（auto=true）：AI 自动扮演访谈者，围绕主题进行 5-10 轮对话，信息充足后自动生成角色档案。适合邮件驱动的无人值守场景。",
+      parameters: {
+        type: "object",
+        properties: {
+          auto: { type: "boolean", description: "是否自动对话模式（默认 false）" },
+          theme: { type: "string", description: "自动模式下的访谈主题/方向（可选，如「都市爱情」「科幻冒险」）" },
+        },
+        required: [],
+      },
     },
   },
   {
@@ -369,7 +380,7 @@ export async function executeTool(
       return await selectCharacter(args.code as string, ctx);
 
     case "start_interview":
-      return startInterview(ctx);
+      return await startInterview(!!args.auto, args.theme as string | undefined, ctx);
 
     case "end_interview":
       return await endInterview(ctx);
@@ -490,7 +501,7 @@ async function selectCharacter(code: string, ctx: ToolContext): Promise<string> 
   }
 }
 
-function startInterview(ctx: ToolContext): string {
+async function startInterview(auto: boolean, theme: string | undefined, ctx: ToolContext): Promise<string> {
   if (!ctx.state.character) {
     return "错误: 尚未选择角色。请先调用 select_character。";
   }
@@ -498,8 +509,96 @@ function startInterview(ctx: ToolContext): string {
     return "错误: AI 客户端未初始化（缺少 LLM_API_KEY，或沿用 OPENROUTER_API_KEY）。";
   }
   const engine = new InterviewEngine(ctx.df.ai, ctx.state.character);
-  ctx.onInterviewStart(engine);
-  return `已进入访谈模式。用户现在可以直接与「${ctx.state.character.name}」对话。用户输入 /done 或你判断访谈充分后，调用 end_interview 结束并生成档案。`;
+
+  if (!auto) {
+    ctx.onInterviewStart(engine);
+    return `已进入访谈模式。用户现在可以直接与「${ctx.state.character.name}」对话。用户输入 /done 或你判断访谈充分后，调用 end_interview 结束并生成档案。`;
+  }
+
+  // Auto interview mode
+  ctx.onProgress(`正在自动访谈「${ctx.state.character.name}」${theme ? `(主题: ${theme})` : ""}...`);
+
+  const result = await runAutoInterview(engine, ctx.df.ai, ctx.state.character, theme, ctx);
+  ctx.onProgress("正在根据访谈记录生成角色档案...");
+  const dossier = await engine.generateDossier();
+  ctx.state.saveDossier(dossier);
+
+  return `自动访谈完成 (${engine.getTurnCount()} 轮)，角色档案已生成并保存。\n\n${result}\n\n**档案摘要:**\n- 姓名: ${dossier.basics.name} (${dossier.basics.age}, ${dossier.basics.identity})\n- 性格: ${dossier.personality.map((p) => p.trait).join("、")}\n- 口头禅: ${dossier.speech_style.catchphrases.join("、")}\n- 外貌: ${dossier.appearance}`;
+}
+
+const AUTO_INTERVIEWER_PROMPT = `你是一位专业的角色访谈者。你正在与一个虚拟角色进行深度访谈，目的是全面了解这个角色的性格、背景、喜好、说话方式等。
+
+访谈策略：
+- 从基础问题开始（名字、身份、日常），逐步深入（性格、情感、恐惧、梦想）
+- 每次只问 1-2 个问题，保持对话自然
+- 根据角色的回答追问有趣的细节
+- 关注角色的语言风格、口头禅、情感表达
+- 5 轮后开始评估信息是否充足
+
+当你认为已经收集到足够信息（通常 5-10 轮），回复 "[INTERVIEW_COMPLETE]" 表示访谈结束。`;
+
+async function runAutoInterview(
+  engine: InterviewEngine,
+  ai: AIClient,
+  character: CharacterProfile,
+  theme: string | undefined,
+  ctx: ToolContext,
+): Promise<string> {
+  const interviewerHistory: ChatMessage[] = [];
+  const maxTurns = 10;
+  const minTurns = 5;
+
+  let systemPrompt = AUTO_INTERVIEWER_PROMPT;
+  if (theme) {
+    systemPrompt += `\n\n访谈主题方向：${theme}。请围绕这个主题展开访谈，了解角色与该主题相关的经历、态度和故事。`;
+  }
+  systemPrompt += `\n\n角色基本信息：「${character.name}」— ${character.description}`;
+
+  // Generate first question
+  const firstQ = await ai.chat(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `请开始访谈，提出你的第一个问题。` },
+    ],
+    { temperature: 0.7, max_tokens: 256 },
+  );
+  interviewerHistory.push({ role: "assistant", content: firstQ });
+
+  const log: string[] = [];
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const question = interviewerHistory[interviewerHistory.length - 1]!.content;
+    ctx.onProgress(`自动访谈 ${turn + 1}/${maxTurns}: 提问中...`);
+
+    // Character answers
+    const answer = await engine.chat(question);
+    log.push(`**访谈者**: ${question}`);
+    log.push(`**${character.name}**: ${answer}`);
+
+    interviewerHistory.push({ role: "user", content: `${character.name} 回答: ${answer}` });
+
+    // Check if interviewer wants to end
+    if (turn + 1 >= minTurns) {
+      interviewerHistory.push({
+        role: "user",
+        content: "请评估：你是否已经收集到足够的信息来生成完整的角色档案？如果是，回复 [INTERVIEW_COMPLETE]。如果还需要继续，请提出下一个问题。",
+      });
+    }
+
+    // Interviewer generates next question or ends
+    const nextResponse = await ai.chat(
+      [{ role: "system", content: systemPrompt }, ...interviewerHistory],
+      { temperature: 0.7, max_tokens: 256 },
+    );
+
+    if (nextResponse.includes("[INTERVIEW_COMPLETE]") || turn + 1 >= maxTurns) {
+      break;
+    }
+
+    interviewerHistory.push({ role: "assistant", content: nextResponse });
+  }
+
+  return log.join("\n\n");
 }
 
 async function endInterview(ctx: ToolContext): Promise<string> {

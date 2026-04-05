@@ -9,6 +9,7 @@ import {
   resolveLlmFromEnv,
   AGENT_TOOLS,
   loadDreamerPrompt,
+  loadSoulPrompt,
   LoopScheduler,
   parseLoopCommand,
   formatInterval,
@@ -150,6 +151,11 @@ export function AgentChat({ projectDirArg }: Props) {
     [projectDir]
   );
 
+  const soulPrompt = useMemo(
+    () => loadSoulPrompt(projectDir),
+    [projectDir]
+  );
+
   const allTools = useMemo(
     () => [...AGENT_TOOLS, ...skillRegistry.getAllTools()],
     [skillRegistry]
@@ -240,11 +246,12 @@ export function AgentChat({ projectDirArg }: Props) {
     const a = new DreamFactoryAgent(df, state, callbacks, {
       skills: skillRegistry,
       dreamerPrompt,
+      soulPrompt,
       loopScheduler: scheduler,
     });
     agentRef.current = a;
     return a;
-  }, [df, state, callbacks, skillRegistry, dreamerPrompt]);
+  }, [df, state, callbacks, skillRegistry, dreamerPrompt, soulPrompt]);
 
   // Dispose loop scheduler on unmount
   useEffect(() => {
@@ -283,10 +290,17 @@ export function AgentChat({ projectDirArg }: Props) {
       });
     }
 
+    if (soulPrompt) {
+      welcomeLines.push({
+        role: "system",
+        content: "已加载 SOUL.md 身份定义",
+      });
+    }
+
     if (dreamerPrompt) {
       welcomeLines.push({
         role: "system",
-        content: "已加载 DREAMER.md 人格定义",
+        content: "已加载 DREAMER.md 产品配置",
       });
     }
 

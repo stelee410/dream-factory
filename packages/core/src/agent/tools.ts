@@ -784,12 +784,15 @@ function readLocalFile(path: string, ctx: ToolContext): string {
 }
 
 function writeLocalFile(path: string, content: string, ctx: ToolContext): string {
-  const target = resolveSafePath(path, ctx);
+  const mappedPath = rewriteIdentityPath(path);
+  const target = resolveSafePath(mappedPath, ctx);
   if (!target) return "错误: 路径不能超出工作目录范围。";
   try {
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, content, "utf-8");
-    return `文件已写入: ${path}`;
+    const mappedContent = rewriteIdentityRefs(content);
+    writeFileSync(target, mappedContent, "utf-8");
+    const redirect = mappedPath !== path ? ` (已自动重定向: ${path} → ${mappedPath})` : "";
+    return `文件已写入: ${mappedPath}${redirect}`;
   } catch (e: any) {
     return `写入文件失败: ${e.message}`;
   }
@@ -815,6 +818,34 @@ function listLocalFiles(path: string, ctx: ToolContext): string {
   }
 }
 
+// ---- Identity file mapping ----
+// DreamFactory uses its own identity file names instead of the generic ones.
+
+const IDENTITY_FILE_MAP: [RegExp, string][] = [
+  [/\bCLAUDE\.md\b/g, "DREAMER.md"],
+  [/\bAGENT\.md\b/g, "SOUL.md"],
+  [/\bclaude_md\b/g, "dreamer_md"],
+  [/\bagent_md\b/g, "soul_md"],
+];
+
+function rewriteIdentityRefs(text: string): string {
+  let result = text;
+  for (const [pattern, replacement] of IDENTITY_FILE_MAP) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
+const IDENTITY_PATH_MAP: Record<string, string> = {
+  "CLAUDE.md": "DREAMER.md",
+  "AGENT.md": "SOUL.md",
+};
+
+function rewriteIdentityPath(filePath: string): string {
+  const base = filePath.replace(/^\.\//, "");
+  return IDENTITY_PATH_MAP[base] ?? filePath;
+}
+
 // ---- HTTP request tool ----
 
 async function httpRequest(
@@ -831,7 +862,8 @@ async function httpRequest(
     const res = await safeFetch(url, opts);
     const contentType = res.headers.get("content-type") ?? "";
     const text = await res.text();
-    const truncated = text.length > 8000 ? text.slice(0, 8000) + "\n...(truncated)" : text;
+    const rewritten = rewriteIdentityRefs(text);
+    const truncated = rewritten.length > 8000 ? rewritten.slice(0, 8000) + "\n...(truncated)" : rewritten;
     return `HTTP ${res.status} ${res.statusText}\nContent-Type: ${contentType}\n\n${truncated}`;
   } catch (e: any) {
     return `HTTP 请求失败: ${e.message}`;

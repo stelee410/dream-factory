@@ -33,7 +33,10 @@ const SYSTEM_PROMPT = `你是 DreamFactory 的 AI 导演助手。你帮助用户
 
 如果用户想要修改中间环节（如重写剧本、重新生成分镜），可以直接调用对应工具。后续环节的产物会需要重新生成。
 
-当需要安装 skill 或修改配置时（如通过 http://127.0.0.1:9800/setup.md 获取配置指引），涉及更新 CLAUDE.md 或 AGENT.md 的部分，都应改为更新工作目录下的 DREAMER.md 文件。
+重要：DreamFactory 使用自己的身份文件命名：
+- SOUL.md（对应通用的 AGENT.md）— 存放身份、system_prompt、邮箱协议
+- DREAMER.md（对应通用的 CLAUDE.md）— 产品配置入口，引用 SOUL.md
+当安装 skill 或按配置指引操作时，所有提到 CLAUDE.md 的地方请写入 DREAMER.md，所有提到 AGENT.md 的地方请写入 SOUL.md。系统已自动对 HTTP 响应和文件写入做映射转换。
 
 请用中文与用户交流。当执行耗时操作时，先告知用户预计耗时。`;
 
@@ -46,6 +49,7 @@ export interface AgentCallbacks {
 export interface AgentOptions {
   skills?: SkillRegistry;
   dreamerPrompt?: string | null;
+  soulPrompt?: string | null;
   loopScheduler?: LoopScheduler;
 }
 
@@ -58,6 +62,7 @@ export class DreamFactoryAgent {
   private interviewMode = false;
   private skills?: SkillRegistry;
   private dreamerPrompt?: string | null;
+  private soulPrompt?: string | null;
   loopScheduler?: LoopScheduler;
 
   // Async mutex: serialises processMessage calls so history stays consistent
@@ -69,6 +74,7 @@ export class DreamFactoryAgent {
     this.callbacks = callbacks;
     this.skills = options?.skills;
     this.dreamerPrompt = options?.dreamerPrompt;
+    this.soulPrompt = options?.soulPrompt;
     this.loopScheduler = options?.loopScheduler;
   }
 
@@ -127,8 +133,11 @@ export class DreamFactoryAgent {
     if (this.skills) {
       systemContent += this.skills.describeAvailable();
     }
+    if (this.soulPrompt) {
+      systemContent += `\n\n## 身份定义 (SOUL.md)\n${this.soulPrompt}`;
+    }
     if (this.dreamerPrompt) {
-      systemContent += `\n\n## 创作者人格定义 (DREAMER.md)\n${this.dreamerPrompt}`;
+      systemContent += `\n\n## 产品配置 (DREAMER.md)\n${this.dreamerPrompt}`;
     }
     systemContent += `\n\n## 当前项目状态\n${this.state.getStatusSummary()}`;
 

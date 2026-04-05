@@ -35,6 +35,10 @@ SEEDANCE_API_KEY=
 
 # Wan (storyboard images)
 WAN_API_KEY=
+
+# LibTV (AI creation platform skill)
+# Get your access_key from https://www.liblib.tv
+LIBTV_ACCESS_KEY=
 `;
 
 writeFileSync(GLOBAL_ENV, content, "utf-8");

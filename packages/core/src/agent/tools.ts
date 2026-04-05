@@ -1,13 +1,18 @@
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { join, resolve, relative, isAbsolute, dirname } from "node:path";
+import { execSync } from "node:child_process";
 import type { ToolDefinition } from "../ai/index.js";
 import type { DreamFactory } from "../context.js";
 import type { CharacterProfile } from "../character/index.js";
 import type { Outline } from "../script/index.js";
+import { safeFetch } from "../api.js";
 import { InterviewEngine } from "../interview/index.js";
 import { ScriptEngine } from "../script/index.js";
 import { StoryboardEngine } from "../storyboard/index.js";
 import { VideoEngine } from "../video/index.js";
 import { DIRECTOR_STYLES, mergeDirectorStyles, describeDirectorStyles } from "../director/index.js";
 import { ProjectState, type DirectorStyleData } from "./project-state.js";
+import type { SkillRegistry } from "../skills/index.js";
 
 // ---- Tool definitions (OpenAI function calling schema) ----
 
@@ -211,6 +216,84 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       parameters: { type: "object", properties: {}, required: [] },
     },
   },
+
+  // ---- File, Network & Shell tools ----
+
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "读取工作目录下的文件内容。支持 .env、DREAMER.md 等配置文件及项目目录下的任意文本文件。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "文件路径（相对于工作目录）" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description: "写入或更新工作目录下的文件。可用于修改 .env、DREAMER.md 等配置文件。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "文件路径（相对于工作目录）" },
+          content: { type: "string", description: "要写入的文件内容" },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_files",
+      description: "列出工作目录下某个路径的文件和子目录。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "目录路径（相对于工作目录，默认 '.'）" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "http_request",
+      description: "发送 HTTP 请求并返回响应。支持 GET/POST/PUT/PATCH/DELETE 等方法。可用于访问网页、调用 API、发送数据等。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "完整 URL" },
+          method: { type: "string", description: "HTTP 方法（默认 GET）", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          headers: { type: "object", description: "自定义请求头（键值对）" },
+          body: { type: "string", description: "请求体（POST/PUT/PATCH 时使用）" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_shell",
+      description: "在工作目录下执行 shell 命令并返回输出。对于 rm、mv、sudo 等危险操作需用户确认（传入 confirmed=true）。超时 60 秒。",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "要执行的 shell 命令" },
+          confirmed: { type: "boolean", description: "危险操作需设为 true 表示用户已确认（默认 false）" },
+        },
+        required: ["command"],
+      },
+    },
+  },
 ];
 
 // ---- Tool executor ----
@@ -222,6 +305,8 @@ export interface ToolContext {
   onInterviewStart: (engine: InterviewEngine) => void;
   onInterviewEnd: () => void;
   onProgress: (message: string) => void;
+  skills?: SkillRegistry;
+  workingDir: string;
 }
 
 export async function executeTool(
@@ -285,8 +370,36 @@ export async function executeTool(
     case "view_storyboard":
       return viewStoryboard(ctx);
 
-    default:
+    case "read_file":
+      return readLocalFile(args.path as string, ctx);
+
+    case "write_file":
+      return writeLocalFile(args.path as string, args.content as string, ctx);
+
+    case "list_files":
+      return listLocalFiles((args.path as string) ?? ".", ctx);
+
+    case "http_request":
+      return await httpRequest(
+        args.url as string,
+        (args.method as string) ?? "GET",
+        (args.headers as Record<string, string>) ?? {},
+        args.body as string | undefined,
+      );
+
+    case "run_shell":
+      return runShell(args.command as string, !!args.confirmed, ctx);
+
+    default: {
+      if (ctx.skills) {
+        const skillResult = await ctx.skills.executeTool(toolName, args, {
+          projectDir: ctx.state.projectDir,
+          onProgress: ctx.onProgress,
+        });
+        if (skillResult !== undefined) return skillResult;
+      }
       return `未知工具: ${toolName}`;
+    }
   }
 }
 
@@ -590,4 +703,117 @@ function viewScript(ctx: ToolContext): string {
 function viewStoryboard(ctx: ToolContext): string {
   if (!ctx.state.storyboard) return "尚未生成分镜图。";
   return StoryboardEngine.toMarkdown(ctx.state.storyboard);
+}
+
+// ---- File tools ----
+
+function resolveSafePath(relativePath: string, ctx: ToolContext): string | null {
+  const base = resolve(ctx.workingDir);
+  const target = resolve(base, relativePath);
+  if (!target.startsWith(base)) return null;
+  return target;
+}
+
+function readLocalFile(path: string, ctx: ToolContext): string {
+  const target = resolveSafePath(path, ctx);
+  if (!target) return "错误: 路径不能超出工作目录范围。";
+  if (!existsSync(target)) return `错误: 文件不存在: ${path}`;
+  try {
+    return readFileSync(target, "utf-8");
+  } catch (e: any) {
+    return `读取文件失败: ${e.message}`;
+  }
+}
+
+function writeLocalFile(path: string, content: string, ctx: ToolContext): string {
+  const target = resolveSafePath(path, ctx);
+  if (!target) return "错误: 路径不能超出工作目录范围。";
+  try {
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content, "utf-8");
+    return `文件已写入: ${path}`;
+  } catch (e: any) {
+    return `写入文件失败: ${e.message}`;
+  }
+}
+
+function listLocalFiles(path: string, ctx: ToolContext): string {
+  const target = resolveSafePath(path, ctx);
+  if (!target) return "错误: 路径不能超出工作目录范围。";
+  if (!existsSync(target)) return `错误: 目录不存在: ${path}`;
+  try {
+    const entries = readdirSync(target);
+    const lines = entries.map((name) => {
+      try {
+        const stat = statSync(join(target, name));
+        return stat.isDirectory() ? `📁 ${name}/` : `📄 ${name}`;
+      } catch {
+        return `   ${name}`;
+      }
+    });
+    return lines.length > 0 ? lines.join("\n") : "(空目录)";
+  } catch (e: any) {
+    return `列出文件失败: ${e.message}`;
+  }
+}
+
+// ---- HTTP request tool ----
+
+async function httpRequest(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+): Promise<string> {
+  try {
+    const opts: RequestInit = { method, headers };
+    if (body && ["POST", "PUT", "PATCH"].includes(method.toUpperCase())) {
+      opts.body = body;
+    }
+    const res = await safeFetch(url, opts);
+    const contentType = res.headers.get("content-type") ?? "";
+    const text = await res.text();
+    const truncated = text.length > 8000 ? text.slice(0, 8000) + "\n...(truncated)" : text;
+    return `HTTP ${res.status} ${res.statusText}\nContent-Type: ${contentType}\n\n${truncated}`;
+  } catch (e: any) {
+    return `HTTP 请求失败: ${e.message}`;
+  }
+}
+
+// ---- Shell tool ----
+
+const DANGEROUS_PATTERNS = [
+  /\brm\s+(-[^\s]*\s+)*\//,
+  /\brm\s+-[^\s]*r/,
+  /\bsudo\b/,
+  /\bmkfs\b/,
+  /\bdd\b\s+/,
+  /\b(chmod|chown)\s+(-[^\s]+\s+)*[0-7]{3,4}\s+\//,
+  />\s*\/dev\//,
+  /\bshutdown\b/,
+  /\breboot\b/,
+];
+
+function isDangerous(cmd: string): boolean {
+  return DANGEROUS_PATTERNS.some((p) => p.test(cmd));
+}
+
+function runShell(command: string, confirmed: boolean, ctx: ToolContext): string {
+  if (isDangerous(command) && !confirmed) {
+    return `⚠️ 检测到危险命令: "${command}"\n请确认后使用 confirmed=true 参数重新调用。`;
+  }
+  try {
+    const output = execSync(command, {
+      cwd: ctx.workingDir,
+      timeout: 60_000,
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return output || "(命令执行成功，无输出)";
+  } catch (e: any) {
+    const stderr = e.stderr ? `\nstderr: ${e.stderr}` : "";
+    const stdout = e.stdout ? `\nstdout: ${e.stdout}` : "";
+    return `命令执行失败 (exit ${e.status ?? "unknown"}):${stderr}${stdout}`;
+  }
 }

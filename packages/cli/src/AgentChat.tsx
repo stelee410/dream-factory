@@ -7,8 +7,11 @@ import {
   DreamFactoryAgent,
   ProjectState,
   resolveLlmFromEnv,
+  AGENT_TOOLS,
+  loadDreamerPrompt,
 } from "@dreamfactory/core";
 import type { AgentCallbacks } from "@dreamfactory/core";
+import { SkillRegistry, LibTVSkill } from "@dreamfactory/core";
 import { SplashBranding } from "./screens/StartupSplash.js";
 import { Login } from "./screens/Login.js";
 import { WorkspaceSelect } from "./screens/WorkspaceSelect.js";
@@ -133,9 +136,25 @@ export function AgentChat({ projectDirArg }: Props) {
   const history = useInputHistory();
   const [paletteHighlight, setPaletteHighlight] = useState(0);
 
+  const skillRegistry = useMemo(() => {
+    const registry = new SkillRegistry();
+    registry.register(new LibTVSkill());
+    return registry;
+  }, []);
+
+  const dreamerPrompt = useMemo(
+    () => loadDreamerPrompt(projectDir),
+    [projectDir]
+  );
+
+  const allTools = useMemo(
+    () => [...AGENT_TOOLS, ...skillRegistry.getAllTools()],
+    [skillRegistry]
+  );
+
   const slashPalette = useMemo(
-    () => buildSlashPalette(input, interviewMode),
-    [input, interviewMode]
+    () => buildSlashPalette(input, interviewMode, allTools),
+    [input, interviewMode, allTools]
   );
 
   const slashPaletteOpen =
@@ -173,8 +192,12 @@ export function AgentChat({ projectDirArg }: Props) {
   );
 
   const agent = useMemo(
-    () => new DreamFactoryAgent(df, state, callbacks),
-    [df, state, callbacks]
+    () =>
+      new DreamFactoryAgent(df, state, callbacks, {
+        skills: skillRegistry,
+        dreamerPrompt,
+      }),
+    [df, state, callbacks, skillRegistry, dreamerPrompt]
   );
 
   // Show welcome messages after login
@@ -199,6 +222,21 @@ export function AgentChat({ projectDirArg }: Props) {
       });
     }
 
+    const availableSkills = skillRegistry.getAvailableSkills();
+    if (availableSkills.length > 0) {
+      welcomeLines.push({
+        role: "system",
+        content: `已加载 Skills: ${availableSkills.map((s) => s.name).join(", ")}`,
+      });
+    }
+
+    if (dreamerPrompt) {
+      welcomeLines.push({
+        role: "system",
+        content: "已加载 DREAMER.md 人格定义",
+      });
+    }
+
     welcomeLines.push({
       role: "system",
       content:
@@ -212,7 +250,7 @@ export function AgentChat({ projectDirArg }: Props) {
     if (key.escape) exit();
     if (loading) return;
 
-    const pal = buildSlashPalette(input, interviewMode);
+    const pal = buildSlashPalette(input, interviewMode, allTools);
     const paletteNav =
       slashPaletteOpen && pal.commands.length > 0;
 
@@ -323,7 +361,7 @@ export function AgentChat({ projectDirArg }: Props) {
   const onChatInputSubmit = useCallback(
     (value: string) => {
       if (loading) return;
-      const pal = buildSlashPalette(value, interviewMode);
+      const pal = buildSlashPalette(value, interviewMode, allTools);
       const trimmedLead = value.trimStart();
       if (
         isSlashPaletteActive(value) &&

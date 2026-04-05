@@ -3,6 +3,7 @@ import type { DreamFactory } from "../context.js";
 import { InterviewEngine } from "../interview/index.js";
 import { ProjectState } from "./project-state.js";
 import { AGENT_TOOLS, executeTool, type ToolContext } from "./tools.js";
+import type { SkillRegistry } from "../skills/index.js";
 
 const SYSTEM_PROMPT = `你是 DreamFactory 的 AI 导演助手。你帮助用户完成短剧制作的全流程：选角 → 访谈 → 设置主题和导演风格 → 生成剧本 → 生成分镜图 → 生成视频。
 
@@ -15,6 +16,9 @@ const SYSTEM_PROMPT = `你是 DreamFactory 的 AI 导演助手。你帮助用户
 - 生成分镜图（AI 图片）
 - 生成视频（图片转视频）
 - 查看已有的档案、剧本、分镜等产物
+- 读写工作目录下的文件（.env、DREAMER.md 等配置文件）
+- 发送 HTTP 请求（访问网页、调用 API）
+- 执行 Shell 命令（在工作目录下运行系统命令）
 
 管道依赖关系：
 1. 先选择角色 (select_character)
@@ -26,12 +30,19 @@ const SYSTEM_PROMPT = `你是 DreamFactory 的 AI 导演助手。你帮助用户
 
 如果用户想要修改中间环节（如重写剧本、重新生成分镜），可以直接调用对应工具。后续环节的产物会需要重新生成。
 
+当需要安装 skill 或修改配置时（如通过 http://127.0.0.1:9800/setup.md 获取配置指引），涉及更新 CLAUDE.md 或 AGENT.md 的部分，都应改为更新工作目录下的 DREAMER.md 文件。
+
 请用中文与用户交流。当执行耗时操作时，先告知用户预计耗时。`;
 
 export interface AgentCallbacks {
   onAssistantMessage: (message: string) => void;
   onToolProgress: (message: string) => void;
   onInterviewModeChange: (active: boolean, characterName?: string) => void;
+}
+
+export interface AgentOptions {
+  skills?: SkillRegistry;
+  dreamerPrompt?: string | null;
 }
 
 export class DreamFactoryAgent {
@@ -41,11 +52,15 @@ export class DreamFactoryAgent {
   private history: ToolChatMessage[] = [];
   private interviewEngine: InterviewEngine | null = null;
   private interviewMode = false;
+  private skills?: SkillRegistry;
+  private dreamerPrompt?: string | null;
 
-  constructor(df: DreamFactory, state: ProjectState, callbacks: AgentCallbacks) {
+  constructor(df: DreamFactory, state: ProjectState, callbacks: AgentCallbacks, options?: AgentOptions) {
     this.df = df;
     this.state = state;
     this.callbacks = callbacks;
+    this.skills = options?.skills;
+    this.dreamerPrompt = options?.dreamerPrompt;
   }
 
   isInInterviewMode(): boolean {
@@ -81,14 +96,25 @@ export class DreamFactoryAgent {
   }
 
   private async handleAgentMessage(userInput: string): Promise<string> {
-    const systemMsg: ToolChatMessage = {
-      role: "system",
-      content: `${SYSTEM_PROMPT}\n\n## 当前项目状态\n${this.state.getStatusSummary()}`,
-    };
+    let systemContent = SYSTEM_PROMPT;
+
+    if (this.skills) {
+      systemContent += this.skills.describeAvailable();
+    }
+    if (this.dreamerPrompt) {
+      systemContent += `\n\n## 创作者人格定义 (DREAMER.md)\n${this.dreamerPrompt}`;
+    }
+    systemContent += `\n\n## 当前项目状态\n${this.state.getStatusSummary()}`;
+
+    const systemMsg: ToolChatMessage = { role: "system", content: systemContent };
 
     this.history.push({ role: "user", content: userInput });
 
     const messages: ToolChatMessage[] = [systemMsg, ...this.history];
+
+    const allTools = this.skills
+      ? [...AGENT_TOOLS, ...this.skills.getAllTools()]
+      : AGENT_TOOLS;
 
     const toolCtx: ToolContext = {
       df: this.df,
@@ -105,9 +131,11 @@ export class DreamFactoryAgent {
         this.callbacks.onInterviewModeChange(false);
       },
       onProgress: (msg) => this.callbacks.onToolProgress(msg),
+      skills: this.skills,
+      workingDir: this.state.projectDir,
     };
 
-    let response = await this.df.ai!.chatWithTools(messages, AGENT_TOOLS, {
+    let response = await this.df.ai!.chatWithTools(messages, allTools, {
       temperature: 0.5,
       max_tokens: 4096,
     });
@@ -151,7 +179,7 @@ export class DreamFactoryAgent {
 
       response = await this.df.ai!.chatWithTools(
         [systemMsg, ...this.history],
-        AGENT_TOOLS,
+        allTools,
         { temperature: 0.5, max_tokens: 4096 }
       );
 

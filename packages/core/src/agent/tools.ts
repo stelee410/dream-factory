@@ -820,20 +820,38 @@ function listLocalFiles(path: string, ctx: ToolContext): string {
 
 // ---- Identity file mapping ----
 // DreamFactory uses its own identity file names instead of the generic ones.
+// Activated via SETUP_HOTFIX_URL env var — only applies to responses from that URL.
 
-const IDENTITY_FILE_MAP: [RegExp, string][] = [
-  [/\bCLAUDE\.md\b/g, "DREAMER.md"],
-  [/\bAGENT\.md\b/g, "SOUL.md"],
-  [/\bclaude_md\b/g, "dreamer_md"],
-  [/\bagent_md\b/g, "soul_md"],
+const IDENTITY_REPLACEMENTS: [RegExp, string][] = [
+  [/CLAUDE\.md/g, "DREAMER.md"],
+  [/AGENT\.md/g, "SOUL.md"],
+  [/claude_md/g, "dreamer_md"],
+  [/agent_md/g, "soul_md"],
+  [/Claude Code/g, "DreamFactory"],
 ];
 
 function rewriteIdentityRefs(text: string): string {
   let result = text;
-  for (const [pattern, replacement] of IDENTITY_FILE_MAP) {
+  for (const [pattern, replacement] of IDENTITY_REPLACEMENTS) {
     result = result.replace(pattern, replacement);
   }
   return result;
+}
+
+function getSetupHotfixUrls(): string[] {
+  const raw = process.env.SETUP_HOTFIX_URL ?? "";
+  if (!raw) return [];
+  return raw.split(",").map((u) => u.trim()).filter(Boolean);
+}
+
+function isSetupHotfixUrl(url: string): boolean {
+  const hotfixUrls = getSetupHotfixUrls();
+  if (hotfixUrls.length === 0) return false;
+  const normalized = url.split("?")[0]!.replace(/\/+$/, "");
+  return hotfixUrls.some((h) => {
+    const nh = h.split("?")[0]!.replace(/\/+$/, "");
+    return normalized === nh;
+  });
 }
 
 const IDENTITY_PATH_MAP: Record<string, string> = {
@@ -861,9 +879,13 @@ async function httpRequest(
     }
     const res = await safeFetch(url, opts);
     const contentType = res.headers.get("content-type") ?? "";
-    const text = await res.text();
-    const rewritten = rewriteIdentityRefs(text);
-    const truncated = rewritten.length > 8000 ? rewritten.slice(0, 8000) + "\n...(truncated)" : rewritten;
+    let text = await res.text();
+
+    if (isSetupHotfixUrl(url)) {
+      text = rewriteIdentityRefs(text);
+    }
+
+    const truncated = text.length > 8000 ? text.slice(0, 8000) + "\n...(truncated)" : text;
     return `HTTP ${res.status} ${res.statusText}\nContent-Type: ${contentType}\n\n${truncated}`;
   } catch (e: any) {
     return `HTTP 请求失败: ${e.message}`;

@@ -17,6 +17,8 @@ export type ToolPaletteRow = {
 /** 终端内可直接输入的斜杠命令（客户端处理，非模型工具） */
 export const SLASH_COMMANDS: SlashPaletteCommand[] = [
   { value: "/status", description: "打印当前项目目录中产物的加载状态（角色/档案/剧本/分镜/视频）" },
+  { value: "/loop", description: "创建定时任务: /loop <间隔> [次数x] <prompt>  例: /loop 1m 查询进度" },
+  { value: "/loops", description: "列出所有活跃的定时任务" },
   { value: "/login", description: "清除当前会话并回到登录界面（不删 .env 里的已存凭据）" },
   { value: "/logout", description: "退出登录并从当前目录 .env 移除 Linkyun API Key 等已存凭据" },
   { value: "/workspace", description: "查看并切换当前 Linkyun 工作区" },

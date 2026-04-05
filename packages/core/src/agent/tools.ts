@@ -13,6 +13,8 @@ import { VideoEngine } from "../video/index.js";
 import { DIRECTOR_STYLES, mergeDirectorStyles, describeDirectorStyles } from "../director/index.js";
 import { ProjectState, type DirectorStyleData } from "./project-state.js";
 import type { SkillRegistry } from "../skills/index.js";
+import type { LoopScheduler } from "./loop-scheduler.js";
+import { parseInterval, formatInterval } from "./loop-scheduler.js";
 
 // ---- Tool definitions (OpenAI function calling schema) ----
 
@@ -294,6 +296,47 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       },
     },
   },
+
+  // ---- Loop (scheduled task) tools ----
+
+  {
+    type: "function",
+    function: {
+      name: "create_loop",
+      description: "创建定时任务，按指定间隔重复执行 prompt。例如每分钟查询进度。结果会自动展示在聊天界面并纳入对话上下文。",
+      parameters: {
+        type: "object",
+        properties: {
+          interval: { type: "string", description: "执行间隔，如 30s、1m、5m、1h" },
+          prompt: { type: "string", description: "每次定时执行的 prompt 内容" },
+          max_runs: { type: "number", description: "最大执行次数（可选，不填则无限循环直到取消）" },
+        },
+        required: ["interval", "prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_loops",
+      description: "列出所有活跃的定时任务。",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_loop",
+      description: "取消一个定时任务。传入 loop_id（如 loop-1）或 'all' 取消所有定时任务。",
+      parameters: {
+        type: "object",
+        properties: {
+          loop_id: { type: "string", description: "定时任务 ID（如 loop-1）或 'all'" },
+        },
+        required: ["loop_id"],
+      },
+    },
+  },
 ];
 
 // ---- Tool executor ----
@@ -307,6 +350,7 @@ export interface ToolContext {
   onProgress: (message: string) => void;
   skills?: SkillRegistry;
   workingDir: string;
+  loopScheduler?: LoopScheduler;
 }
 
 export async function executeTool(
@@ -389,6 +433,20 @@ export async function executeTool(
 
     case "run_shell":
       return runShell(args.command as string, !!args.confirmed, ctx);
+
+    case "create_loop":
+      return createLoop(
+        args.interval as string,
+        args.prompt as string,
+        args.max_runs as number | undefined,
+        ctx,
+      );
+
+    case "list_loops":
+      return listLoops(ctx);
+
+    case "cancel_loop":
+      return cancelLoop(args.loop_id as string, ctx);
 
     default: {
       if (ctx.skills) {
@@ -816,4 +874,54 @@ function runShell(command: string, confirmed: boolean, ctx: ToolContext): string
     const stdout = e.stdout ? `\nstdout: ${e.stdout}` : "";
     return `命令执行失败 (exit ${e.status ?? "unknown"}):${stderr}${stdout}`;
   }
+}
+
+// ---- Loop tools ----
+
+function createLoop(interval: string, prompt: string, maxRuns: number | undefined, ctx: ToolContext): string {
+  if (!ctx.loopScheduler) return "错误: 定时任务调度器未初始化。";
+  const ms = parseInterval(interval);
+  if (!ms) return `错误: 无法解析间隔 "${interval}"。支持格式: 30s、1m、5m、1h`;
+  if (ms < 10_000) return "错误: 间隔不能小于 10 秒。";
+
+  const task = ctx.loopScheduler.create(ms, prompt, maxRuns);
+  return JSON.stringify({
+    id: task.id,
+    interval: formatInterval(task.intervalMs),
+    prompt: task.prompt,
+    maxRuns: task.maxRuns ?? "无限",
+    message: `定时任务 ${task.id} 已创建，每 ${formatInterval(task.intervalMs)} 执行一次。${task.maxRuns ? `最多执行 ${task.maxRuns} 次。` : ""}`,
+  });
+}
+
+function listLoops(ctx: ToolContext): string {
+  if (!ctx.loopScheduler) return "错误: 定时任务调度器未初始化。";
+  const tasks = ctx.loopScheduler.list();
+  if (tasks.length === 0) return "当前没有活跃的定时任务。";
+
+  const lines = tasks.map((t) => {
+    const parts = [
+      `ID: ${t.id}`,
+      `间隔: ${formatInterval(t.intervalMs)}`,
+      `Prompt: ${t.prompt}`,
+      `已执行: ${t.runCount}${t.maxRuns ? `/${t.maxRuns}` : ""} 次`,
+      `状态: ${t.running ? "执行中" : "等待中"}`,
+    ];
+    if (t.lastRunAt) parts.push(`上次执行: ${t.lastRunAt.toLocaleTimeString()}`);
+    return parts.join(" | ");
+  });
+
+  return `活跃定时任务 (${tasks.length} 个):\n${lines.join("\n")}`;
+}
+
+function cancelLoop(loopId: string, ctx: ToolContext): string {
+  if (!ctx.loopScheduler) return "错误: 定时任务调度器未初始化。";
+
+  if (loopId === "all") {
+    const count = ctx.loopScheduler.cancelAll();
+    return count > 0 ? `已取消所有定时任务 (共 ${count} 个)。` : "当前没有活跃的定时任务。";
+  }
+
+  const ok = ctx.loopScheduler.cancel(loopId);
+  return ok ? `定时任务 ${loopId} 已取消。` : `未找到定时任务 ${loopId}。`;
 }

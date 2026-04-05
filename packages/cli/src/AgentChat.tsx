@@ -9,8 +9,11 @@ import {
   resolveLlmFromEnv,
   AGENT_TOOLS,
   loadDreamerPrompt,
+  LoopScheduler,
+  parseLoopCommand,
+  formatInterval,
 } from "@dreamfactory/core";
-import type { AgentCallbacks } from "@dreamfactory/core";
+import type { AgentCallbacks, LoopTask } from "@dreamfactory/core";
 import { SkillRegistry, LibTVSkill } from "@dreamfactory/core";
 import { SplashBranding } from "./screens/StartupSplash.js";
 import { Login } from "./screens/Login.js";
@@ -191,14 +194,64 @@ export function AgentChat({ projectDirArg }: Props) {
     []
   );
 
-  const agent = useMemo(
-    () =>
-      new DreamFactoryAgent(df, state, callbacks, {
-        skills: skillRegistry,
-        dreamerPrompt,
-      }),
-    [df, state, callbacks, skillRegistry, dreamerPrompt]
-  );
+  const loopSchedulerRef = useRef<LoopScheduler | null>(null);
+
+  const agentRef = useRef<DreamFactoryAgent | null>(null);
+
+  const agent = useMemo(() => {
+    const loopCallbacks = {
+      onLoopStart: (task: LoopTask) => {
+        setMessages((prev) => [
+          ...prev,
+          { role: "progress", content: `⏱ [${task.id}] 定时执行: ${task.prompt}` },
+        ]);
+      },
+      onLoopResult: (task: LoopTask, reply: string) => {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `⏱ [${task.id}] ${reply}` },
+        ]);
+      },
+      onLoopError: (task: LoopTask, error: string) => {
+        setMessages((prev) => [
+          ...prev,
+          { role: "system", content: `⏱ [${task.id}] 执行出错: ${error}` },
+        ]);
+      },
+      onLoopEnd: (task: LoopTask, reason: "completed" | "cancelled") => {
+        const msg =
+          reason === "completed"
+            ? `⏱ [${task.id}] 已完成全部 ${task.runCount} 次执行。`
+            : `⏱ [${task.id}] 已取消。`;
+        setMessages((prev) => [...prev, { role: "system", content: msg }]);
+      },
+    };
+
+    // processFn will be set after agent is created
+    const scheduler = new LoopScheduler(
+      async (prompt: string) => {
+        if (!agentRef.current) throw new Error("Agent not ready");
+        return agentRef.current.processMessage(prompt);
+      },
+      loopCallbacks,
+    );
+    loopSchedulerRef.current = scheduler;
+
+    const a = new DreamFactoryAgent(df, state, callbacks, {
+      skills: skillRegistry,
+      dreamerPrompt,
+      loopScheduler: scheduler,
+    });
+    agentRef.current = a;
+    return a;
+  }, [df, state, callbacks, skillRegistry, dreamerPrompt]);
+
+  // Dispose loop scheduler on unmount
+  useEffect(() => {
+    return () => {
+      loopSchedulerRef.current?.dispose();
+    };
+  }, []);
 
   // Show welcome messages after login
   useEffect(() => {
@@ -323,6 +376,73 @@ export function AgentChat({ projectDirArg }: Props) {
         setMessages((prev) => [
           ...prev,
           { role: "system", content: state.getStatusSummary() },
+        ]);
+        return;
+      }
+
+      if (trimmed === "/loops") {
+        const scheduler = loopSchedulerRef.current;
+        if (!scheduler || scheduler.size === 0) {
+          setMessages((prev) => [...prev, { role: "system", content: "当前没有活跃的定时任务。" }]);
+        } else {
+          const tasks = scheduler.list();
+          const lines = tasks.map(
+            (t) =>
+              `  ${t.id}: 每 ${formatInterval(t.intervalMs)} 执行「${t.prompt}」(已运行 ${t.runCount}${t.maxRuns ? `/${t.maxRuns}` : ""} 次${t.running ? ", 执行中" : ""})`,
+          );
+          setMessages((prev) => [
+            ...prev,
+            { role: "system", content: `活跃定时任务 (${tasks.length} 个):\n${lines.join("\n")}` },
+          ]);
+        }
+        return;
+      }
+
+      if (trimmed.startsWith("/loop stop ") || trimmed.startsWith("/loop cancel ")) {
+        const id = trimmed.split(/\s+/).pop()!;
+        const scheduler = loopSchedulerRef.current;
+        if (!scheduler) {
+          setMessages((prev) => [...prev, { role: "system", content: "定时任务调度器未初始化。" }]);
+          return;
+        }
+        if (id === "all") {
+          const count = scheduler.cancelAll();
+          setMessages((prev) => [
+            ...prev,
+            { role: "system", content: count > 0 ? `已取消所有定时任务 (共 ${count} 个)。` : "当前没有活跃的定时任务。" },
+          ]);
+        } else {
+          const ok = scheduler.cancel(id);
+          setMessages((prev) => [
+            ...prev,
+            { role: "system", content: ok ? `定时任务 ${id} 已取消。` : `未找到定时任务 ${id}。` },
+          ]);
+        }
+        return;
+      }
+
+      if (trimmed.startsWith("/loop ")) {
+        const argsStr = trimmed.slice(6).trim();
+        const parsed = parseLoopCommand(argsStr);
+        if (!parsed) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "system", content: "格式错误。用法: /loop <间隔> [次数x] <prompt>\n例: /loop 1m 查询进度\n例: /loop 30s 3x 检查状态" },
+          ]);
+          return;
+        }
+        const scheduler = loopSchedulerRef.current;
+        if (!scheduler) {
+          setMessages((prev) => [...prev, { role: "system", content: "定时任务调度器未初始化。" }]);
+          return;
+        }
+        const task = scheduler.create(parsed.intervalMs, parsed.prompt, parsed.maxRuns);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `定时任务 ${task.id} 已创建 — 每 ${formatInterval(task.intervalMs)} 执行「${task.prompt}」${task.maxRuns ? `(最多 ${task.maxRuns} 次)` : ""}`,
+          },
         ]);
         return;
       }

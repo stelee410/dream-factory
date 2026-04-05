@@ -4,6 +4,8 @@ import { InterviewEngine } from "../interview/index.js";
 import { ProjectState } from "./project-state.js";
 import { AGENT_TOOLS, executeTool, type ToolContext } from "./tools.js";
 import type { SkillRegistry } from "../skills/index.js";
+import type { LoopScheduler } from "./loop-scheduler.js";
+import { formatInterval as formatLoopInterval } from "./loop-scheduler.js";
 
 const SYSTEM_PROMPT = `你是 DreamFactory 的 AI 导演助手。你帮助用户完成短剧制作的全流程：选角 → 访谈 → 设置主题和导演风格 → 生成剧本 → 生成分镜图 → 生成视频。
 
@@ -19,6 +21,7 @@ const SYSTEM_PROMPT = `你是 DreamFactory 的 AI 导演助手。你帮助用户
 - 读写工作目录下的文件（.env、DREAMER.md 等配置文件）
 - 发送 HTTP 请求（访问网页、调用 API）
 - 执行 Shell 命令（在工作目录下运行系统命令）
+- 创建定时任务（定期执行 prompt，如每分钟查询进度）
 
 管道依赖关系：
 1. 先选择角色 (select_character)
@@ -43,6 +46,7 @@ export interface AgentCallbacks {
 export interface AgentOptions {
   skills?: SkillRegistry;
   dreamerPrompt?: string | null;
+  loopScheduler?: LoopScheduler;
 }
 
 export class DreamFactoryAgent {
@@ -54,6 +58,10 @@ export class DreamFactoryAgent {
   private interviewMode = false;
   private skills?: SkillRegistry;
   private dreamerPrompt?: string | null;
+  loopScheduler?: LoopScheduler;
+
+  // Async mutex: serialises processMessage calls so history stays consistent
+  private _queue: Promise<string> = Promise.resolve("");
 
   constructor(df: DreamFactory, state: ProjectState, callbacks: AgentCallbacks, options?: AgentOptions) {
     this.df = df;
@@ -61,6 +69,7 @@ export class DreamFactoryAgent {
     this.callbacks = callbacks;
     this.skills = options?.skills;
     this.dreamerPrompt = options?.dreamerPrompt;
+    this.loopScheduler = options?.loopScheduler;
   }
 
   isInInterviewMode(): boolean {
@@ -68,13 +77,30 @@ export class DreamFactoryAgent {
   }
 
   /**
-   * Process a user message. Returns the assistant's final text response.
+   * Process a user message. Serialised via async mutex so concurrent
+   * callers (user input + loop tasks) never interleave history writes.
    */
   async processMessage(userInput: string): Promise<string> {
-    if (this.interviewMode && this.interviewEngine) {
-      return this.handleInterviewMessage(userInput);
+    const prev = this._queue;
+    let resolve!: (v: string) => void;
+    this._queue = new Promise<string>((r) => { resolve = r; });
+
+    // Wait for any previous call to finish
+    await prev.catch(() => {});
+
+    try {
+      let result: string;
+      if (this.interviewMode && this.interviewEngine) {
+        result = await this.handleInterviewMessage(userInput);
+      } else {
+        result = await this.handleAgentMessage(userInput);
+      }
+      resolve(result);
+      return result;
+    } catch (e) {
+      resolve("");
+      throw e;
     }
-    return this.handleAgentMessage(userInput);
   }
 
   private async handleInterviewMessage(userInput: string): Promise<string> {
@@ -106,6 +132,14 @@ export class DreamFactoryAgent {
     }
     systemContent += `\n\n## 当前项目状态\n${this.state.getStatusSummary()}`;
 
+    if (this.loopScheduler && this.loopScheduler.size > 0) {
+      const loops = this.loopScheduler.list();
+      const lines = loops.map(
+        (t) => `- ${t.id}: 每${formatLoopInterval(t.intervalMs)}执行「${t.prompt}」(已运行 ${t.runCount} 次${t.maxRuns ? `/${t.maxRuns}` : ""})`,
+      );
+      systemContent += `\n\n## 活跃定时任务 (${loops.length} 个)\n${lines.join("\n")}`;
+    }
+
     const systemMsg: ToolChatMessage = { role: "system", content: systemContent };
 
     this.history.push({ role: "user", content: userInput });
@@ -133,6 +167,7 @@ export class DreamFactoryAgent {
       onProgress: (msg) => this.callbacks.onToolProgress(msg),
       skills: this.skills,
       workingDir: this.state.projectDir,
+      loopScheduler: this.loopScheduler,
     };
 
     let response = await this.df.ai!.chatWithTools(messages, allTools, {

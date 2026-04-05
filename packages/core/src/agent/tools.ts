@@ -784,15 +784,12 @@ function readLocalFile(path: string, ctx: ToolContext): string {
 }
 
 function writeLocalFile(path: string, content: string, ctx: ToolContext): string {
-  const mappedPath = rewriteIdentityPath(path);
-  const target = resolveSafePath(mappedPath, ctx);
+  const target = resolveSafePath(path, ctx);
   if (!target) return "错误: 路径不能超出工作目录范围。";
   try {
     mkdirSync(dirname(target), { recursive: true });
-    const mappedContent = rewriteIdentityRefs(content);
-    writeFileSync(target, mappedContent, "utf-8");
-    const redirect = mappedPath !== path ? ` (已自动重定向: ${path} → ${mappedPath})` : "";
-    return `文件已写入: ${mappedPath}${redirect}`;
+    writeFileSync(target, content, "utf-8");
+    return `文件已写入: ${path}`;
   } catch (e: any) {
     return `写入文件失败: ${e.message}`;
   }
@@ -818,52 +815,6 @@ function listLocalFiles(path: string, ctx: ToolContext): string {
   }
 }
 
-// ---- Identity file mapping ----
-// DreamFactory uses its own identity file names instead of the generic ones.
-// Activated via SETUP_HOTFIX_URL env var — only applies to responses from that URL.
-
-const IDENTITY_REPLACEMENTS: [RegExp, string][] = [
-  [/CLAUDE\.md/g, "DREAMER.md"],
-  [/AGENT\.md/g, "SOUL.md"],
-  [/claude_md/g, "dreamer_md"],
-  [/agent_md/g, "soul_md"],
-  [/Claude Code/g, "DreamFactory"],
-];
-
-function rewriteIdentityRefs(text: string): string {
-  let result = text;
-  for (const [pattern, replacement] of IDENTITY_REPLACEMENTS) {
-    result = result.replace(pattern, replacement);
-  }
-  return result;
-}
-
-function getSetupHotfixUrls(): string[] {
-  const raw = process.env.SETUP_HOTFIX_URL ?? "";
-  if (!raw) return [];
-  return raw.split(",").map((u) => u.trim()).filter(Boolean);
-}
-
-function isSetupHotfixUrl(url: string): boolean {
-  const hotfixUrls = getSetupHotfixUrls();
-  if (hotfixUrls.length === 0) return false;
-  const normalized = url.split("?")[0]!.replace(/\/+$/, "");
-  return hotfixUrls.some((h) => {
-    const nh = h.split("?")[0]!.replace(/\/+$/, "");
-    return normalized === nh;
-  });
-}
-
-const IDENTITY_PATH_MAP: Record<string, string> = {
-  "CLAUDE.md": "DREAMER.md",
-  "AGENT.md": "SOUL.md",
-};
-
-function rewriteIdentityPath(filePath: string): string {
-  const base = filePath.replace(/^\.\//, "");
-  return IDENTITY_PATH_MAP[base] ?? filePath;
-}
-
 // ---- HTTP request tool ----
 
 async function httpRequest(
@@ -879,12 +830,7 @@ async function httpRequest(
     }
     const res = await safeFetch(url, opts);
     const contentType = res.headers.get("content-type") ?? "";
-    let text = await res.text();
-
-    if (isSetupHotfixUrl(url)) {
-      text = rewriteIdentityRefs(text);
-    }
-
+    const text = await res.text();
     const truncated = text.length > 8000 ? text.slice(0, 8000) + "\n...(truncated)" : text;
     return `HTTP ${res.status} ${res.statusText}\nContent-Type: ${contentType}\n\n${truncated}`;
   } catch (e: any) {

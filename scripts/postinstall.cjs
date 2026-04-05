@@ -40,9 +40,6 @@ WAN_API_KEY=
 # Get your access_key from https://www.liblib.tv
 LIBTV_ACCESS_KEY=
 
-# Setup Hotfix — rewrite CLAUDE.md/AGENT.md refs to DREAMER.md/SOUL.md
-# when fetching from this URL (comma-separated for multiple)
-SETUP_HOTFIX_URL=http://127.0.0.1:9800/setup.md
 `;
 
 writeFileSync(GLOBAL_ENV, content, "utf-8");
